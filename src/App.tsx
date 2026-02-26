@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { 
   Home, 
   MessageSquare, 
@@ -139,7 +140,29 @@ const Badge = ({
 // --- Main App ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('home');
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  const routeToTab = (pathname: string) => {
+    if (pathname.startsWith('/chat')) return 'chat'
+    if (pathname.startsWith('/documents')) return 'documents'
+    if (pathname.startsWith('/applications')) return 'applications'
+    if (pathname.startsWith('/settings')) return 'settings'
+    if (pathname.startsWith('/dashboard')) return 'dashboard'
+    if (pathname === '/' || pathname.startsWith('/home')) return 'home'
+    return 'dashboard'
+  }
+
+  const tabToRoute: Record<string, string> = {
+    home: '/',
+    dashboard: '/dashboard',
+    chat: '/chat',
+    documents: '/documents',
+    applications: '/applications',
+    settings: '/settings',
+  }
+
+  const [activeTab, setActiveTab] = useState(routeToTab(location.pathname));
   const [user, setUser] = useState<UserProfile>({});
   const [cvs, setCvs] = useState<CVData[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -163,6 +186,13 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [cvError, setCvError] = useState<string | null>(null);
+
+  // Keep tab state in sync with URL.
+  useEffect(() => {
+    const next = routeToTab(location.pathname)
+    if (next !== activeTab) setActiveTab(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
 
   const cvFileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -1012,8 +1042,6 @@ export default function App() {
 
   // --- Main Layout ---
 
-  if (activeTab === 'home') return <LandingPage />;
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       {/* Desktop Sidebar */}
@@ -1032,7 +1060,7 @@ export default function App() {
           ].map(item => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => navigate(tabToRoute[item.id] || '/dashboard')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === item.id ? 'bg-slate-900 text-white shadow-lg shadow-slate-200' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <item.icon size={20} />
@@ -1064,11 +1092,16 @@ export default function App() {
             exit={{ opacity: 0, x: -10 }}
             className={`flex-1 h-full flex flex-col ${activeTab !== 'chat' ? 'overflow-y-auto' : 'overflow-hidden'}`}
           >
-            {activeTab === 'dashboard' && <DashboardView />}
-            {activeTab === 'chat' && <ChatView />}
-            {activeTab === 'documents' && <DocumentsView />}
-            {activeTab === 'applications' && <ApplicationsView />}
-            {activeTab === 'settings' && <SettingsView />}
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/home" element={<Navigate to="/" replace />} />
+              <Route path="/dashboard" element={<DashboardView />} />
+              <Route path="/chat" element={<ChatView />} />
+              <Route path="/documents" element={<DocumentsView />} />
+              <Route path="/applications" element={<ApplicationsView />} />
+              <Route path="/settings" element={<SettingsView />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
           </motion.div>
         </AnimatePresence>
       </main>
@@ -1084,7 +1117,7 @@ export default function App() {
         ].map(item => (
           <button
             key={item.id}
-            onClick={() => setActiveTab(item.id)}
+            onClick={() => navigate(tabToRoute[item.id] || '/dashboard')}
             className={`flex flex-col items-center gap-1 ${activeTab === item.id ? 'text-slate-900' : 'text-slate-400'}`}
           >
             <item.icon size={22} className={activeTab === item.id ? 'stroke-[2.5px]' : ''} />
