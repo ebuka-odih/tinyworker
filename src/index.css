@@ -1,0 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+@layer base {
+  body {
+    @apply text-slate-900 antialiased bg-white;
+  }
+  
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-all active:scale-[0.98];
+  }
+  
+  .card-premium {
+    @apply bg-white border border-slate-200/60 rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-all;
+  }
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.markdown-body {
+  @apply text-slate-700 leading-relaxed space-y-4;
+}
+
+.markdown-body h1 { @apply text-2xl font-bold text-slate-900; }
+.markdown-body h2 { @apply text-xl font-bold text-slate-900; }
+.markdown-body p { @apply text-base; }
+.markdown-body ul { @apply list-disc pl-5 space-y-2; }
+.markdown-body li { @apply text-slate-700; }

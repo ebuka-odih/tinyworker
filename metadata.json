@@ -1,0 +1,7 @@
+{
+  "name": "Opportunity Agent",
+  "description": "AI-powered agent for finding scholarships, jobs, and visa requirements with CV intelligence and tailored application support.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
