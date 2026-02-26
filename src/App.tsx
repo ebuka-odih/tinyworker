@@ -26,6 +26,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile, CVData, Opportunity, Application, ChatMessage, Document } from './types';
 import { tinyfishService } from './services/tinyfishService';
 
+// shadcn/ui
+import { Button as ShadButton } from '../components/ui/button'
+import { Card as ShadCard, CardContent as ShadCardContent } from '../components/ui/card'
+import { Badge as ShadBadge } from '../components/ui/badge'
+
 // --- Components ---
 
   const Modal = ({ isOpen, onClose, title, children }: { isOpen: boolean, onClose: () => void, title: string, children: React.ReactNode }) => {
@@ -51,62 +56,85 @@ import { tinyfishService } from './services/tinyfishService';
   );
 };
 
-const Button = ({ 
-  children, 
-  onClick, 
-  variant = 'primary', 
-  className = '', 
+const Button = ({
+  children,
+  onClick,
+  variant = 'primary',
+  className = '',
   disabled = false,
-  icon: Icon
-}: { 
-  children: React.ReactNode, 
-  onClick?: () => void, 
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger',
-  className?: string,
-  disabled?: boolean,
-  icon?: any,
+  icon: Icon,
+}: {
+  children: React.ReactNode
+  onClick?: () => void
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger'
+  className?: string
+  disabled?: boolean
+  icon?: any
   key?: React.Key
 }) => {
-  const variants = {
-    primary: 'bg-slate-900 text-white hover:bg-slate-800 shadow-sm',
-    secondary: 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm',
-    outline: 'border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300',
-    ghost: 'text-slate-600 hover:bg-slate-100',
-    danger: 'text-rose-600 hover:bg-rose-50'
-  };
+  const mapVariant = (v: string): any => {
+    switch (v) {
+      case 'primary':
+        return 'default'
+      case 'secondary':
+        return 'default'
+      case 'outline':
+        return 'outline'
+      case 'ghost':
+        return 'ghost'
+      case 'danger':
+        return 'destructive'
+      default:
+        return 'default'
+    }
+  }
 
   return (
-    <button 
+    <ShadButton
+      variant={mapVariant(variant)}
       onClick={onClick}
       disabled={disabled}
-      className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none ${variants[variant]} ${className}`}
+      className={className}
     >
       {Icon && <Icon size={18} />}
       {children}
-    </button>
-  );
-};
+    </ShadButton>
+  )
+}
 
-const Card = ({ children, className = '', id }: { children: React.ReactNode, className?: string, id?: string, key?: React.Key }) => (
-  <div id={id} className={`bg-white border border-slate-200/60 rounded-2xl p-5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${className}`}>
-    {children}
-  </div>
-);
+const Card = ({
+  children,
+  className = '',
+  id,
+}: {
+  children: React.ReactNode
+  className?: string
+  id?: string
+  key?: React.Key
+}) => (
+  <ShadCard id={id} className={className}>
+    <ShadCardContent className="p-5">{children}</ShadCardContent>
+  </ShadCard>
+)
 
-const Badge = ({ children, color = 'slate' }: { children: React.ReactNode, color?: string }) => {
-  const colors: Record<string, string> = {
-    indigo: 'bg-slate-900 text-white border-slate-900',
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    rose: 'bg-rose-50 text-rose-700 border-rose-100',
-    amber: 'bg-amber-50 text-amber-700 border-amber-100',
-    slate: 'bg-slate-50 text-slate-700 border-slate-200',
-  };
-  return (
-    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${colors[color] || colors.slate}`}>
-      {children}
-    </span>
-  );
-};
+const Badge = ({
+  children,
+  color = 'slate',
+}: {
+  children: React.ReactNode
+  color?: string
+}) => {
+  // map old color scheme to shadcn variants
+  const variant = ((): any => {
+    if (color === 'indigo') return 'default'
+    if (color === 'emerald') return 'secondary'
+    if (color === 'amber') return 'secondary'
+    if (color === 'rose') return 'destructive'
+    return 'outline'
+  })()
+
+  return <ShadBadge variant={variant}>{children}</ShadBadge>
+}
 
 // --- Main App ---
 
