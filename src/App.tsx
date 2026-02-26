@@ -113,29 +113,7 @@ const Badge = ({ children, color = 'slate' }: { children: React.ReactNode, color
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [user, setUser] = useState<UserProfile>({});
-  const [cvs, setCvs] = useState<CVData[]>([
-    {
-      id: '1',
-      name: 'Master CV v2.pdf',
-      version: 2,
-      content: `Emma Gab
-Software Engineer
-Skills: React, TypeScript, Node.js, Python, AWS.
-Experience:
-- Frontend Developer at TechCorp (2021-Present): Built scalable web apps using React and TypeScript. Improved performance by 40%.
-- Junior Developer at StartUpInc (2019-2021): Developed features for a mobile-first web app.
-Education: BS in Computer Science, University of Zurich (2019).`,
-      createdAt: new Date().toISOString(),
-      healthScore: {
-        total: 85,
-        atsReadability: 90,
-        impact: 80,
-        skills: 85,
-        formatting: 85,
-        suggestions: ['Add more measurable achievements', 'Highlight AWS experience more']
-      }
-    }
-  ]);
+  const [cvs, setCvs] = useState<CVData[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [documents, setDocuments] = useState<Document[]>([
@@ -156,6 +134,53 @@ Education: BS in Computer Science, University of Zurich (2019).`,
   ]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [cvError, setCvError] = useState<string | null>(null);
+
+  const cvFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const loadCvs = async () => {
+    try {
+      const res = await fetch('api/cv');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.cvs)) {
+        // map server records → CVData minimal
+        const mapped: CVData[] = data.cvs.map((c: any) => ({
+          id: String(c.id),
+          name: String(c.filename || 'CV'),
+          version: 1,
+          content: '',
+          createdAt: String(c.uploadedAt || new Date().toISOString()),
+        }));
+        setCvs(mapped);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const uploadCv = async (file: File) => {
+    setCvError(null);
+    setIsLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('api/cv/upload', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || 'Upload failed');
+      }
+      await loadCvs();
+    } catch (e: any) {
+      setCvError(e?.message || 'Upload failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCvs();
+  }, []);
 
   // --- Views ---
 
@@ -538,12 +563,26 @@ Education: BS in Computer Science, University of Zurich (2019).`,
 
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-4">
-          <button className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-slate-400 transition-colors group">
+          <button
+            onClick={() => cvFileInputRef.current?.click()}
+            className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-slate-400 transition-colors group"
+          >
             <div className="w-10 h-10 bg-slate-100 text-slate-900 rounded-full flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-colors">
               <Upload size={20} />
             </div>
-            <span className="text-xs font-bold text-slate-700">Upload CV</span>
+            <span className="text-xs font-bold text-slate-700">{isLoading ? 'Uploading…' : 'Upload CV'}</span>
           </button>
+          <input
+            ref={cvFileInputRef}
+            type="file"
+            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) uploadCv(f);
+              e.currentTarget.value = '';
+            }}
+          />
           <button className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-emerald-200 transition-colors group">
             <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
               <Search size={20} />
@@ -551,6 +590,12 @@ Education: BS in Computer Science, University of Zurich (2019).`,
             <span className="text-xs font-bold text-slate-700">Find Jobs</span>
           </button>
         </div>
+
+        {cvError ? (
+          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+            {cvError}
+          </div>
+        ) : null}
 
         {/* Main Sections */}
         <div className="space-y-4">
@@ -564,10 +609,12 @@ Education: BS in Computer Science, University of Zurich (2019).`,
                 <FileText size={24} />
               </div>
               <div className="flex-1">
-                <div className="font-bold text-slate-800">Master CV v2.pdf</div>
-                <div className="text-xs text-slate-500">Updated 2 days ago</div>
+                <div className="font-bold text-slate-800">{cvs[0]?.name || 'No CV uploaded yet'}</div>
+                <div className="text-xs text-slate-500">
+                  {cvs[0]?.createdAt ? `Uploaded ${new Date(cvs[0].createdAt).toLocaleString()}` : 'Upload a PDF or DOCX to begin'}
+                </div>
               </div>
-              <Badge color="emerald">Healthy</Badge>
+              <Badge color={cvs.length ? 'emerald' : 'slate'}>{cvs.length ? 'On file' : 'Missing'}</Badge>
             </div>
             <div className="mt-4 pt-4 border-t border-slate-50 flex gap-2">
               <Button variant="outline" className="flex-1 text-xs py-1.5" icon={Sparkles} onClick={() => setIsRevampModalOpen(true)}>Revamp</Button>
