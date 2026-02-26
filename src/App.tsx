@@ -609,8 +609,8 @@ export default function App() {
                 <FileText size={24} />
               </div>
               <div className="flex-1">
-                <div className="font-bold text-slate-800">{cvs[0]?.name || 'No CV uploaded yet'}</div>
-                <div className="text-xs text-slate-500">
+                <div className="font-bold text-slate-800 truncate max-w-[220px] sm:max-w-[420px]">{cvs[0]?.name || 'No CV uploaded yet'}</div>
+                <div className="text-xs text-slate-500 truncate max-w-[220px] sm:max-w-[420px]">
                   {cvs[0]?.createdAt ? `Uploaded ${new Date(cvs[0].createdAt).toLocaleString()}` : 'Upload a PDF or DOCX to begin'}
                 </div>
               </div>
