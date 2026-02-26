@@ -521,15 +521,15 @@ export default function App() {
         </div>
 
         {/* Input Area - Sticky at bottom */}
-        <div className="shrink-0 p-4 bg-white/90 backdrop-blur-md border-t border-slate-100 z-30 sticky bottom-0 md:bottom-0 bottom-[84px]">
-          <div className="max-w-3xl mx-auto flex gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-slate-900/10 focus-within:border-slate-900 transition-all">
+        <div className="shrink-0 p-3 md:p-4 bg-white/90 backdrop-blur-md border-t border-slate-100 z-30 sticky bottom-0 md:bottom-0 bottom-[84px]">
+          <div className="max-w-3xl mx-auto flex gap-2 bg-slate-50 p-1 md:p-1.5 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-slate-900/10 focus-within:border-slate-900 transition-all">
             <input 
               type="text" 
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Ask me anything..." 
-              className="flex-1 bg-transparent border-none rounded-xl px-4 py-2 focus:outline-none text-sm text-slate-700"
+              className="flex-1 bg-transparent border-none rounded-xl px-3 md:px-4 py-2 focus:outline-none text-sm text-slate-700"
             />
             <Button 
               variant="primary" 
@@ -540,7 +540,7 @@ export default function App() {
               <ArrowRight size={20} />
             </Button>
           </div>
-          <p className="text-[10px] text-center text-slate-400 mt-2 font-medium">
+          <p className="text-[10px] text-center text-slate-400 mt-1 md:mt-2 font-medium">
             Click options above or type to search
           </p>
         </div>
