@@ -679,8 +679,18 @@ export default function App() {
               <Badge color={cvs.length ? 'emerald' : 'slate'}>{cvs.length ? 'On file' : 'Missing'}</Badge>
             </div>
             <div className="mt-4 pt-4 border-t border-slate-50 flex gap-2">
-              <Button variant="outline" className="flex-1 text-xs py-1.5" icon={Sparkles} onClick={() => setIsRevampModalOpen(true)}>Revamp</Button>
-              <Button variant="outline" className="flex-1 text-xs py-1.5" icon={Download}>Download</Button>
+              <Button
+                variant="primary"
+                className="flex-1 text-xs py-2 shadow-lg shadow-slate-200"
+                icon={Search}
+                disabled={!cvs.length || isLoading}
+                onClick={() => {
+                  // Next step after upload: guided job search
+                  setActiveTab('chat')
+                }}
+              >
+                {cvs.length ? 'Continue → Find Jobs' : 'Upload CV to continue'}
+              </Button>
             </div>
           </Card>
 
