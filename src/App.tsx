@@ -368,10 +368,14 @@ export default function App() {
     const [inputValue, setInputValue] = useState('');
     const scrollRef = React.useRef<HTMLDivElement>(null);
 
+    const scrollToBottom = () => {
+      const el = scrollRef.current
+      if (!el) return
+      el.scrollTop = el.scrollHeight
+    }
+
     useEffect(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
+      scrollToBottom()
     }, [messages, isTyping]);
 
     const handleOption = async (option: string) => {
@@ -451,7 +455,7 @@ export default function App() {
         {/* Messages Area - Scrollable */}
         <div 
           ref={scrollRef}
-          className="flex-1 overflow-y-auto p-4 space-y-6 pb-10 scroll-smooth"
+          className="flex-1 overflow-y-auto p-4 space-y-6 pb-44 scroll-smooth"
         >
           {messages.map((msg, i) => (
             <motion.div 
@@ -517,7 +521,7 @@ export default function App() {
         </div>
 
         {/* Input Area - Sticky at bottom */}
-        <div className="shrink-0 p-4 bg-white border-t border-slate-100 z-20">
+        <div className="shrink-0 p-4 bg-white/90 backdrop-blur-md border-t border-slate-100 z-30 sticky bottom-0">
           <div className="max-w-3xl mx-auto flex gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-slate-900/10 focus-within:border-slate-900 transition-all">
             <input 
               type="text" 
