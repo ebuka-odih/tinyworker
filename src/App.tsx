@@ -438,7 +438,8 @@ export default function App() {
               <h3 className="font-bold text-slate-900 text-sm">Opportunity Agent</h3>
               <div className="flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Active Search</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Agent View</span>
+                <span className="text-[10px] text-slate-400">• Guided steps + results</span>
               </div>
             </div>
           </div>
@@ -1067,7 +1068,7 @@ export default function App() {
         <nav className="flex-1 space-y-2">
           {[
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-            { id: 'chat', label: 'Chat', icon: MessageSquare },
+            { id: 'chat', label: 'Agent', icon: MessageSquare },
             { id: 'documents', label: 'Documents', icon: FileText },
             { id: 'applications', label: 'Applications', icon: Briefcase },
             { id: 'settings', label: 'Settings', icon: Settings },
@@ -1124,7 +1125,7 @@ export default function App() {
       <nav className="md:hidden fixed bottom-0 w-full bg-white border-t border-slate-200 px-4 py-3 flex items-center justify-between z-50 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
         {[
           { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
-          { id: 'chat', icon: MessageSquare, label: 'Chat' },
+          { id: 'chat', icon: MessageSquare, label: 'Agent' },
           { id: 'documents', icon: FileText, label: 'Docs' },
           { id: 'applications', icon: Briefcase, label: 'Apps' },
           { id: 'settings', icon: Settings, label: 'Settings' },
