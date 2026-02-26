@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile, CVData, Opportunity, Application, ChatMessage, Document } from './types';
-import { geminiService } from './services/geminiService';
+import { tinyfishService } from './services/tinyfishService';
 
 // --- Components ---
 
@@ -309,8 +309,9 @@ Education: BS in Computer Science, University of Zurich (2019).`,
             setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, content: `Found 12 potential matches. Analyzing eligibility criteria for each...` } : m));
             
             setTimeout(async () => {
-              const results = await geminiService.searchOpportunities(`Scholarships in ${option}`, 'scholarship');
-              setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: `I've curated the top 5 scholarships in ${option} that align with your background. You can view the full details and start tailoring your SOP in the dashboard:`, type: 'results', results }]);
+              // Scholarships search is coming soon (TinyFish integration will be added after jobs MVP)
+              const results: Opportunity[] = []
+              setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: `Scholarship search is coming next. For now, Jobs search is enabled.`, type: 'results', results }]);
               setIsTyping(false);
             }, 1500);
           }, 1500);
@@ -319,8 +320,8 @@ Education: BS in Computer Science, University of Zurich (2019).`,
           setMessages(prev => [...prev, { role: 'assistant', content: `Great. I'm scanning top-tier tech hubs and companies offering visa sponsorship for Software Engineers...`, type: 'progress' }]);
           
           setTimeout(async () => {
-            const results = await geminiService.searchOpportunities(`Software Engineering jobs with visa sponsorship`, 'job');
-            setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: `I've identified several high-match roles. I've prioritized those with confirmed visa support:`, type: 'results', results }]);
+            const results = await tinyfishService.searchJobsLinkedIn('Software Engineering visa sponsorship')
+            setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: `Here are roles I found on LinkedIn (public search):`, type: 'results', results }]);
             setIsTyping(false);
           }, 2000);
           return;
@@ -474,8 +475,9 @@ Education: BS in Computer Science, University of Zurich (2019).`,
       setIsRevamping(true);
       try {
         const masterCV = cvs[0]?.content || '';
-        const result = await geminiService.tailorCV(masterCV, `Target Role: ${targetRole}, Tone: ${targetTone}`);
-        setRevampResult(result);
+        // Resume revamp will be implemented after jobs search MVP.
+        // For now, keep a simple placeholder so the UI works end-to-end.
+        setRevampResult(`(Coming soon) Resume revamp for: ${targetRole} (${targetTone})\n\nWe will rewrite your CV to match selected jobs using extracted keywords.`);
       } catch (error) {
         console.error('Revamp failed:', error);
       } finally {
