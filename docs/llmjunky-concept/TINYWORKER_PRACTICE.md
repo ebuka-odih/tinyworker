@@ -52,6 +52,11 @@ Wave examples:
 
 We only use Super Swarms for purely parallel tasks (e.g., “polish 6 pages” + “write docs” + “add icons”).
 
+**Operational rule:** before spawning any workers, the orchestrator verifies the plan has:
+- task IDs (T1…)
+- explicit `depends_on` arrays
+- acceptance criteria + validation per task
+
 ---
 
 ## 4) The required TinyWorker worker prompt template

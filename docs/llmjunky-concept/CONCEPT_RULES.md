@@ -43,6 +43,16 @@ The orchestrator should avoid doing large implementation work itself unless requ
 
 ## 3) Two execution modes
 
+### Swarm Waves (recommended default)
+- Launch one worker per **unblocked** task (based on `depends_on`).
+- After completion, update the plan state, then launch the next wave.
+- Lowest conflict + lowest token burn.
+
+### Super Swarms (speed-first)
+- Launch as many agents as `max_threads` allows regardless of dependencies.
+- Expect conflicts; best for decoupled tasks (UI polish, docs).
+
+
 ### 3A) Swarm Waves (recommended default)
 **Rule 3A.1 — Launch only unblocked tasks in waves.**
 - Spawn one worker per unblocked task.
@@ -89,26 +99,40 @@ Workers should always be instructed to:
 
 ## 6) Configuration rules (minimum viable)
 
-### 6.1 Enable multi-agent features and set parallelism
-Example (conceptually):
+### 6.1 Enable swarms + parallelism in Codex (`~/.codex/config.toml`)
+
+Minimal example (adapt to your environment):
+
 ```toml
+# Recommended: strong orchestrator model for planning/coordination
+model = "gpt-5.3-codex"
+plan_mode_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
+
 [features]
 collaboration_modes = true
 multi_agent = true
 
 [agents]
-max_threads = 16 # default often ~6
+max_threads = 16 # base often ~6. Increase for larger swarms.
+
+# Example worker role
+[agents.sparky]
+description = "Executes implementation tasks from a structured plan."
+config_file = "agents/sparky.toml"
 ```
 
 ### 6.2 Define custom roles
+
 Example:
+
 ```toml
 [agents.security_auditor]
 description = "Finds auth, injection, and secrets risks."
 config_file = "agents/security_auditor.toml"
 
 [agents.sparky]
-description = "Executes implementation tasks from a structured plan."
+description = "Use for executing implementation tasks from a structured plan."
 config_file = "agents/sparky.toml"
 ```
 
