@@ -27,7 +27,7 @@
 - files:
   - backend/src/main.ts
   - package.json
-  - vite.config.ts
+  - frontend/vite.config.ts
   - README.md
   - README_BACKEND.md
   - backend/README.md
@@ -46,9 +46,9 @@
   - Add auth headers to protected API calls.
   - Protect dashboard/chat/documents/applications routes.
 - files:
-  - src/App.tsx
-  - src/types.ts
-  - src/services/tinyfishService.ts
+  - frontend/src/App.tsx
+  - frontend/src/types.ts
+  - frontend/src/services/tinyfishService.ts
 - acceptance_criteria:
   - User can register/login and access protected screens
   - Token is reused across refreshes
@@ -65,7 +65,7 @@
   - Persist edits via API.
 - files:
   - backend/src/profile/profile.controller.ts
-  - src/App.tsx
+  - frontend/src/App.tsx
 - acceptance_criteria:
   - Upload CV -> extract profile -> review profile works
   - preferred roles/locations/links save
@@ -100,7 +100,7 @@
   - backend/src/applications/*
   - backend/src/documents/*
   - backend/src/app.module.ts
-  - src/App.tsx
+  - frontend/src/App.tsx
 - acceptance_criteria:
   - Search results can be persisted as opportunities
   - Saved applications are visible in pipeline views
