@@ -251,6 +251,7 @@ export default function App() {
         throw new Error(t || 'Failed to save profile')
       }
       await loadProfiles()
+      await loadDocuments()
     } catch (e: any) {
       setProfileError(e?.message || 'Failed to save profile')
     } finally {

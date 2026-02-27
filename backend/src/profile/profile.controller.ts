@@ -22,9 +22,41 @@ import {
 const USE_TINYFISH_FOR_PROFILE_EXTRACTION = /^(1|true|yes)$/i.test(
   String(process.env.PROFILE_USE_TINYFISH || ''),
 )
+const PROFILE_PREFS_DOCUMENT_TITLE = 'Profile Preferences Snapshot'
 
 function appendWarning(current: string | null, next: string): string {
   return current ? `${current}; ${next}` : next
+}
+
+function toStringArray(value: any): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((v) => String(v || '').trim())
+    .filter(Boolean)
+}
+
+function buildPreferencesDocumentContent(profile: any): string {
+  const roles = toStringArray(profile?.preferredRoles)
+  const locations = toStringArray(profile?.preferredLocations)
+  const links = (profile?.links || {}) as Record<string, any>
+  const lines = [
+    '# Profile Preferences',
+    '',
+    `Saved At: ${new Date().toISOString()}`,
+    `Profile ID: ${String(profile?.id || '')}`,
+    '',
+    '## Preferred Roles',
+    ...(roles.length ? roles.map((r) => `- ${r}`) : ['- (none set)']),
+    '',
+    '## Preferred Locations',
+    ...(locations.length ? locations.map((l) => `- ${l}`) : ['- (none set)']),
+    '',
+    '## Links',
+    `- GitHub: ${String(links.github || '(not set)')}`,
+    `- LinkedIn: ${String(links.linkedin || '(not set)')}`,
+    `- Portfolio: ${String(links.portfolio || '(not set)')}`,
+  ]
+  return lines.join('\n')
 }
 
 const UpdateProfileSchema = z.object({
@@ -185,15 +217,43 @@ export class ProfileController {
       throw new BadRequestException({ error: 'Invalid input', details: e?.issues || e?.message })
     }
 
-    const updated = await this.prisma.candidateProfile.update({
-      where: { id: profileId },
-      data: {
-        preferredRoles: data.preferredRoles ?? undefined,
-        preferredLocations: data.preferredLocations ?? undefined,
-        links: data.links ?? undefined,
-      },
+    const { updated, preferencesDocument } = await this.prisma.$transaction(async (tx) => {
+      const updatedProfile = await tx.candidateProfile.update({
+        where: { id: profileId },
+        data: {
+          preferredRoles: data.preferredRoles ?? undefined,
+          preferredLocations: data.preferredLocations ?? undefined,
+          links: data.links ?? undefined,
+        },
+      })
+
+      const content = buildPreferencesDocumentContent(updatedProfile)
+      const existingDoc = await tx.document.findFirst({
+        where: {
+          userId,
+          type: 'sop',
+          title: PROFILE_PREFS_DOCUMENT_TITLE,
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+
+      const doc = existingDoc
+        ? await tx.document.update({
+            where: { id: existingDoc.id },
+            data: { content, title: PROFILE_PREFS_DOCUMENT_TITLE },
+          })
+        : await tx.document.create({
+            data: {
+              userId,
+              type: 'sop',
+              title: PROFILE_PREFS_DOCUMENT_TITLE,
+              content,
+            },
+          })
+
+      return { updated: updatedProfile, preferencesDocument: doc }
     })
 
-    return { ok: true, profile: updated }
+    return { ok: true, profile: updated, preferencesDocument }
   }
 }
