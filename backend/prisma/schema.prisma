@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cvs      CV[]
+  profiles CandidateProfile[]
+
+  @@index([createdAt])
+}
+
+model CV {
+  id            String   @id @default(uuid())
+  userId        String
+  filename      String
+  mimeType      String?
+  sizeBytes     Int?
+  storagePath   String
+  accessToken   String   @unique
+  extractedText String?  @db.Text
+  keywords      Json?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model CandidateProfile {
+  id                   String   @id @default(uuid())
+  userId               String
+  cvId                 String?
+
+  name                 String?
+  titleHeadline        String?
+  seniorityGuess       String?
+  yearsExperienceGuess Float?
+
+  roles                Json?
+  skills               Json?
+  toolsStack           Json?
+  industries           Json?
+  achievements         Json?
+  education            Json?
+  certifications       Json?
+  keywords             Json?
+  preferredRoles       Json?
+  preferredLocations   Json?
+  links                Json?
+  redFlags             Json?
+
+  source               String   @default("cv") // cv|intent|mixed
+  status               String   @default("draft") // draft|ready
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status])
+}

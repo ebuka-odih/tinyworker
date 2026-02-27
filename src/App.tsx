@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { 
   Home, 
   MessageSquare, 
@@ -24,7 +25,12 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile, CVData, Opportunity, Application, ChatMessage, Document } from './types';
-import { geminiService } from './services/geminiService';
+import { tinyfishService } from './services/tinyfishService';
+
+// shadcn/ui
+import { Button as ShadButton } from '../components/ui/button'
+import { Card as ShadCard, CardContent as ShadCardContent } from '../components/ui/card'
+import { Badge as ShadBadge } from '../components/ui/badge'
 
 // --- Components ---
 
@@ -51,91 +57,114 @@ import { geminiService } from './services/geminiService';
   );
 };
 
-const Button = ({ 
-  children, 
-  onClick, 
-  variant = 'primary', 
-  className = '', 
+const Button = ({
+  children,
+  onClick,
+  variant = 'primary',
+  className = '',
   disabled = false,
-  icon: Icon
-}: { 
-  children: React.ReactNode, 
-  onClick?: () => void, 
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger',
-  className?: string,
-  disabled?: boolean,
-  icon?: any,
+  icon: Icon,
+}: {
+  children: React.ReactNode
+  onClick?: () => void
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger'
+  className?: string
+  disabled?: boolean
+  icon?: any
   key?: React.Key
 }) => {
-  const variants = {
-    primary: 'bg-slate-900 text-white hover:bg-slate-800 shadow-sm',
-    secondary: 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm',
-    outline: 'border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300',
-    ghost: 'text-slate-600 hover:bg-slate-100',
-    danger: 'text-rose-600 hover:bg-rose-50'
-  };
+  const mapVariant = (v: string): any => {
+    switch (v) {
+      case 'primary':
+        return 'default'
+      case 'secondary':
+        return 'default'
+      case 'outline':
+        return 'outline'
+      case 'ghost':
+        return 'ghost'
+      case 'danger':
+        return 'destructive'
+      default:
+        return 'default'
+    }
+  }
 
   return (
-    <button 
+    <ShadButton
+      variant={mapVariant(variant)}
       onClick={onClick}
       disabled={disabled}
-      className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none ${variants[variant]} ${className}`}
+      className={className}
     >
       {Icon && <Icon size={18} />}
       {children}
-    </button>
-  );
-};
+    </ShadButton>
+  )
+}
 
-const Card = ({ children, className = '', id }: { children: React.ReactNode, className?: string, id?: string, key?: React.Key }) => (
-  <div id={id} className={`bg-white border border-slate-200/60 rounded-2xl p-5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${className}`}>
-    {children}
-  </div>
-);
+const Card = ({
+  children,
+  className = '',
+  id,
+}: {
+  children: React.ReactNode
+  className?: string
+  id?: string
+  key?: React.Key
+}) => (
+  <ShadCard id={id} className={className}>
+    <ShadCardContent className="p-5">{children}</ShadCardContent>
+  </ShadCard>
+)
 
-const Badge = ({ children, color = 'slate' }: { children: React.ReactNode, color?: string }) => {
-  const colors: Record<string, string> = {
-    indigo: 'bg-slate-900 text-white border-slate-900',
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    rose: 'bg-rose-50 text-rose-700 border-rose-100',
-    amber: 'bg-amber-50 text-amber-700 border-amber-100',
-    slate: 'bg-slate-50 text-slate-700 border-slate-200',
-  };
-  return (
-    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${colors[color] || colors.slate}`}>
-      {children}
-    </span>
-  );
-};
+const Badge = ({
+  children,
+  color = 'slate',
+}: {
+  children: React.ReactNode
+  color?: string
+}) => {
+  // map old color scheme to shadcn variants
+  const variant = ((): any => {
+    if (color === 'indigo') return 'default'
+    if (color === 'emerald') return 'secondary'
+    if (color === 'amber') return 'secondary'
+    if (color === 'rose') return 'destructive'
+    return 'outline'
+  })()
+
+  return <ShadBadge variant={variant}>{children}</ShadBadge>
+}
 
 // --- Main App ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('home');
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  const routeToTab = (pathname: string) => {
+    if (pathname.startsWith('/chat')) return 'chat'
+    if (pathname.startsWith('/documents')) return 'documents'
+    if (pathname.startsWith('/applications')) return 'applications'
+    if (pathname.startsWith('/settings')) return 'settings'
+    if (pathname.startsWith('/dashboard')) return 'dashboard'
+    if (pathname === '/' || pathname.startsWith('/home')) return 'home'
+    return 'dashboard'
+  }
+
+  const tabToRoute: Record<string, string> = {
+    home: '/',
+    dashboard: '/dashboard',
+    chat: '/chat',
+    documents: '/documents',
+    applications: '/applications',
+    settings: '/settings',
+  }
+
+  const [activeTab, setActiveTab] = useState(routeToTab(location.pathname));
   const [user, setUser] = useState<UserProfile>({});
-  const [cvs, setCvs] = useState<CVData[]>([
-    {
-      id: '1',
-      name: 'Master CV v2.pdf',
-      version: 2,
-      content: `Emma Gab
-Software Engineer
-Skills: React, TypeScript, Node.js, Python, AWS.
-Experience:
-- Frontend Developer at TechCorp (2021-Present): Built scalable web apps using React and TypeScript. Improved performance by 40%.
-- Junior Developer at StartUpInc (2019-2021): Developed features for a mobile-first web app.
-Education: BS in Computer Science, University of Zurich (2019).`,
-      createdAt: new Date().toISOString(),
-      healthScore: {
-        total: 85,
-        atsReadability: 90,
-        impact: 80,
-        skills: 85,
-        formatting: 85,
-        suggestions: ['Add more measurable achievements', 'Highlight AWS experience more']
-      }
-    }
-  ]);
+  const [cvs, setCvs] = useState<CVData[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [documents, setDocuments] = useState<Document[]>([
@@ -156,6 +185,60 @@ Education: BS in Computer Science, University of Zurich (2019).`,
   ]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [cvError, setCvError] = useState<string | null>(null);
+
+  // Keep tab state in sync with URL.
+  useEffect(() => {
+    const next = routeToTab(location.pathname)
+    if (next !== activeTab) setActiveTab(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
+
+  const cvFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const loadCvs = async () => {
+    try {
+      const res = await fetch('api/cv');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.cvs)) {
+        // map server records → CVData minimal
+        const mapped: CVData[] = data.cvs.map((c: any) => ({
+          id: String(c.id),
+          name: String(c.filename || 'CV'),
+          version: 1,
+          content: '',
+          createdAt: String(c.uploadedAt || new Date().toISOString()),
+        }));
+        setCvs(mapped);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const uploadCv = async (file: File) => {
+    setCvError(null);
+    setIsLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('api/cv/upload', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || 'Upload failed');
+      }
+      await loadCvs();
+    } catch (e: any) {
+      setCvError(e?.message || 'Upload failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCvs();
+  }, []);
 
   // --- Views ---
 
@@ -285,10 +368,14 @@ Education: BS in Computer Science, University of Zurich (2019).`,
     const [inputValue, setInputValue] = useState('');
     const scrollRef = React.useRef<HTMLDivElement>(null);
 
+    const scrollToBottom = () => {
+      const el = scrollRef.current
+      if (!el) return
+      el.scrollTop = el.scrollHeight
+    }
+
     useEffect(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
+      scrollToBottom()
     }, [messages, isTyping]);
 
     const handleOption = async (option: string) => {
@@ -309,8 +396,9 @@ Education: BS in Computer Science, University of Zurich (2019).`,
             setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, content: `Found 12 potential matches. Analyzing eligibility criteria for each...` } : m));
             
             setTimeout(async () => {
-              const results = await geminiService.searchOpportunities(`Scholarships in ${option}`, 'scholarship');
-              setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: `I've curated the top 5 scholarships in ${option} that align with your background. You can view the full details and start tailoring your SOP in the dashboard:`, type: 'results', results }]);
+              // Scholarships search is coming soon (TinyFish integration will be added after jobs MVP)
+              const results: Opportunity[] = []
+              setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: `Scholarship search is coming next. For now, Jobs search is enabled.`, type: 'results', results }]);
               setIsTyping(false);
             }, 1500);
           }, 1500);
@@ -319,8 +407,8 @@ Education: BS in Computer Science, University of Zurich (2019).`,
           setMessages(prev => [...prev, { role: 'assistant', content: `Great. I'm scanning top-tier tech hubs and companies offering visa sponsorship for Software Engineers...`, type: 'progress' }]);
           
           setTimeout(async () => {
-            const results = await geminiService.searchOpportunities(`Software Engineering jobs with visa sponsorship`, 'job');
-            setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: `I've identified several high-match roles. I've prioritized those with confirmed visa support:`, type: 'results', results }]);
+            const results = await tinyfishService.searchJobsLinkedIn('Software Engineering visa sponsorship')
+            setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: `Here are roles I found on LinkedIn (public search):`, type: 'results', results }]);
             setIsTyping(false);
           }, 2000);
           return;
@@ -350,7 +438,8 @@ Education: BS in Computer Science, University of Zurich (2019).`,
               <h3 className="font-bold text-slate-900 text-sm">Opportunity Agent</h3>
               <div className="flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Active Search</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Agent View</span>
+                <span className="text-[10px] text-slate-400">• Guided steps + results</span>
               </div>
             </div>
           </div>
@@ -367,7 +456,7 @@ Education: BS in Computer Science, University of Zurich (2019).`,
         {/* Messages Area - Scrollable */}
         <div 
           ref={scrollRef}
-          className="flex-1 overflow-y-auto p-4 space-y-6 pb-10 scroll-smooth"
+          className="flex-1 overflow-y-auto p-4 space-y-6 pb-[180px] md:pb-44 scroll-smooth"
         >
           {messages.map((msg, i) => (
             <motion.div 
@@ -433,15 +522,15 @@ Education: BS in Computer Science, University of Zurich (2019).`,
         </div>
 
         {/* Input Area - Sticky at bottom */}
-        <div className="shrink-0 p-4 bg-white border-t border-slate-100 z-20">
-          <div className="max-w-3xl mx-auto flex gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-slate-900/10 focus-within:border-slate-900 transition-all">
+        <div className="shrink-0 p-3 md:p-4 bg-white/90 backdrop-blur-md border-t border-slate-100 z-30 sticky bottom-0 md:bottom-0 bottom-[84px]">
+          <div className="max-w-3xl mx-auto flex gap-2 bg-slate-50 p-1 md:p-1.5 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-slate-900/10 focus-within:border-slate-900 transition-all">
             <input 
               type="text" 
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Ask me anything..." 
-              className="flex-1 bg-transparent border-none rounded-xl px-4 py-2 focus:outline-none text-sm text-slate-700"
+              className="flex-1 bg-transparent border-none rounded-xl px-3 md:px-4 py-2 focus:outline-none text-sm text-slate-700"
             />
             <Button 
               variant="primary" 
@@ -452,7 +541,7 @@ Education: BS in Computer Science, University of Zurich (2019).`,
               <ArrowRight size={20} />
             </Button>
           </div>
-          <p className="text-[10px] text-center text-slate-400 mt-2 font-medium">
+          <p className="text-[10px] text-center text-slate-400 mt-1 md:mt-2 font-medium">
             Click options above or type to search
           </p>
         </div>
@@ -474,8 +563,9 @@ Education: BS in Computer Science, University of Zurich (2019).`,
       setIsRevamping(true);
       try {
         const masterCV = cvs[0]?.content || '';
-        const result = await geminiService.tailorCV(masterCV, `Target Role: ${targetRole}, Tone: ${targetTone}`);
-        setRevampResult(result);
+        // Resume revamp will be implemented after jobs search MVP.
+        // For now, keep a simple placeholder so the UI works end-to-end.
+        setRevampResult(`(Coming soon) Resume revamp for: ${targetRole} (${targetTone})\n\nWe will rewrite your CV to match selected jobs using extracted keywords.`);
       } catch (error) {
         console.error('Revamp failed:', error);
       } finally {
@@ -536,12 +626,26 @@ Education: BS in Computer Science, University of Zurich (2019).`,
 
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-4">
-          <button className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-slate-400 transition-colors group">
+          <button
+            onClick={() => cvFileInputRef.current?.click()}
+            className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-slate-400 transition-colors group"
+          >
             <div className="w-10 h-10 bg-slate-100 text-slate-900 rounded-full flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-colors">
               <Upload size={20} />
             </div>
-            <span className="text-xs font-bold text-slate-700">Upload CV</span>
+            <span className="text-xs font-bold text-slate-700">{isLoading ? 'Uploading…' : 'Upload CV'}</span>
           </button>
+          <input
+            ref={cvFileInputRef}
+            type="file"
+            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) uploadCv(f);
+              e.currentTarget.value = '';
+            }}
+          />
           <button className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-emerald-200 transition-colors group">
             <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
               <Search size={20} />
@@ -549,6 +653,12 @@ Education: BS in Computer Science, University of Zurich (2019).`,
             <span className="text-xs font-bold text-slate-700">Find Jobs</span>
           </button>
         </div>
+
+        {cvError ? (
+          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+            {cvError}
+          </div>
+        ) : null}
 
         {/* Main Sections */}
         <div className="space-y-4">
@@ -562,14 +672,26 @@ Education: BS in Computer Science, University of Zurich (2019).`,
                 <FileText size={24} />
               </div>
               <div className="flex-1">
-                <div className="font-bold text-slate-800">Master CV v2.pdf</div>
-                <div className="text-xs text-slate-500">Updated 2 days ago</div>
+                <div className="font-bold text-slate-800 truncate max-w-[220px] sm:max-w-[420px]">{cvs[0]?.name || 'No CV uploaded yet'}</div>
+                <div className="text-xs text-slate-500 truncate max-w-[220px] sm:max-w-[420px]">
+                  {cvs[0]?.createdAt ? `Uploaded ${new Date(cvs[0].createdAt).toLocaleString()}` : 'Upload a PDF or DOCX to begin'}
+                </div>
               </div>
-              <Badge color="emerald">Healthy</Badge>
+              <Badge color={cvs.length ? 'emerald' : 'slate'}>{cvs.length ? 'On file' : 'Missing'}</Badge>
             </div>
             <div className="mt-4 pt-4 border-t border-slate-50 flex gap-2">
-              <Button variant="outline" className="flex-1 text-xs py-1.5" icon={Sparkles} onClick={() => setIsRevampModalOpen(true)}>Revamp</Button>
-              <Button variant="outline" className="flex-1 text-xs py-1.5" icon={Download}>Download</Button>
+              <Button
+                variant="primary"
+                className="flex-1 text-xs py-2 shadow-lg shadow-slate-200"
+                icon={Search}
+                disabled={!cvs.length || isLoading}
+                onClick={() => {
+                  // Next step after upload: guided job search
+                  setActiveTab('chat')
+                }}
+              >
+                {cvs.length ? 'Continue → Find Jobs' : 'Upload CV to continue'}
+              </Button>
             </div>
           </Card>
 
@@ -935,8 +1057,6 @@ Education: BS in Computer Science, University of Zurich (2019).`,
 
   // --- Main Layout ---
 
-  if (activeTab === 'home') return <LandingPage />;
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       {/* Desktop Sidebar */}
@@ -948,14 +1068,14 @@ Education: BS in Computer Science, University of Zurich (2019).`,
         <nav className="flex-1 space-y-2">
           {[
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-            { id: 'chat', label: 'Chat', icon: MessageSquare },
+            { id: 'chat', label: 'Agent', icon: MessageSquare },
             { id: 'documents', label: 'Documents', icon: FileText },
             { id: 'applications', label: 'Applications', icon: Briefcase },
             { id: 'settings', label: 'Settings', icon: Settings },
           ].map(item => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => navigate(tabToRoute[item.id] || '/dashboard')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === item.id ? 'bg-slate-900 text-white shadow-lg shadow-slate-200' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <item.icon size={20} />
@@ -987,11 +1107,16 @@ Education: BS in Computer Science, University of Zurich (2019).`,
             exit={{ opacity: 0, x: -10 }}
             className={`flex-1 h-full flex flex-col ${activeTab !== 'chat' ? 'overflow-y-auto' : 'overflow-hidden'}`}
           >
-            {activeTab === 'dashboard' && <DashboardView />}
-            {activeTab === 'chat' && <ChatView />}
-            {activeTab === 'documents' && <DocumentsView />}
-            {activeTab === 'applications' && <ApplicationsView />}
-            {activeTab === 'settings' && <SettingsView />}
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/home" element={<Navigate to="/" replace />} />
+              <Route path="/dashboard" element={<DashboardView />} />
+              <Route path="/chat" element={<ChatView />} />
+              <Route path="/documents" element={<DocumentsView />} />
+              <Route path="/applications" element={<ApplicationsView />} />
+              <Route path="/settings" element={<SettingsView />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
           </motion.div>
         </AnimatePresence>
       </main>
@@ -1000,14 +1125,14 @@ Education: BS in Computer Science, University of Zurich (2019).`,
       <nav className="md:hidden fixed bottom-0 w-full bg-white border-t border-slate-200 px-4 py-3 flex items-center justify-between z-50 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
         {[
           { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
-          { id: 'chat', icon: MessageSquare, label: 'Chat' },
+          { id: 'chat', icon: MessageSquare, label: 'Agent' },
           { id: 'documents', icon: FileText, label: 'Docs' },
           { id: 'applications', icon: Briefcase, label: 'Apps' },
           { id: 'settings', icon: Settings, label: 'Settings' },
         ].map(item => (
           <button
             key={item.id}
-            onClick={() => setActiveTab(item.id)}
+            onClick={() => navigate(tabToRoute[item.id] || '/dashboard')}
             className={`flex flex-col items-center gap-1 ${activeTab === item.id ? 'text-slate-900' : 'text-slate-400'}`}
           >
             <item.icon size={22} className={activeTab === item.id ? 'stroke-[2.5px]' : ''} />

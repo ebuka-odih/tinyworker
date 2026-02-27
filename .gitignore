@@ -6,3 +6,12 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# backend artifacts
+backend/node_modules/
+backend/dist/
+backend/data/
+backend/.env
+
+# legacy express local runtime data
+.openclaw/
