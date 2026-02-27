@@ -2,6 +2,10 @@
   "name": "tinyworker",
   "private": true,
   "scripts": {
+    "install:frontend": "npm --prefix frontend install --include=dev",
+    "install:backend": "npm --prefix backend install --include=dev",
+    "install:all": "npm run install:frontend && npm run install:backend",
+    "prebuild": "npm run install:all",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:client": "npm run dev:frontend",
     "dev:backend": "npm --prefix backend run start:dev",
