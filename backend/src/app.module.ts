@@ -7,6 +7,10 @@ import { UsersModule } from './users/users.module'
 import { AuthModule } from './auth/auth.module'
 import { CvModule } from './cv/cv.module'
 import { ProfileModule } from './profile/profile.module'
+import { TinyfishModule } from './tinyfish/tinyfish.module'
+import { OpportunitiesModule } from './opportunities/opportunities.module'
+import { ApplicationsModule } from './applications/applications.module'
+import { DocumentsModule } from './documents/documents.module'
 
 @Module({
   imports: [
@@ -16,6 +20,10 @@ import { ProfileModule } from './profile/profile.module'
     AuthModule,
     CvModule,
     ProfileModule,
+    TinyfishModule,
+    OpportunitiesModule,
+    ApplicationsModule,
+    DocumentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

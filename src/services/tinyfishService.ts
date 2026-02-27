@@ -17,9 +17,13 @@ function toOpportunities(items: any[], type: 'job' | 'scholarship' | 'visa'): Op
 
 export const tinyfishService = {
   async run(req: TinyfishRunRequest): Promise<TinyfishSseEvent> {
-    const res = await fetch('api/tinyfish/run', {
+    const token = localStorage.getItem('tinyworker.access_token') || ''
+    const res = await fetch('/api/tinyfish/run', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(req),
     })
 

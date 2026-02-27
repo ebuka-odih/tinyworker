@@ -12,20 +12,30 @@ Backend API for TinyWorker (job discovery + CV profile extraction + tailoring wo
 ## Setup
 
 ```bash
-pnpm install
+npm install
 cp .env.example .env
 # set DATABASE_URL and JWT_SECRET
-pnpm prisma migrate dev
-pnpm start:dev
+npx prisma migrate dev
+npm run start:dev
 ```
 
 ## Endpoints
-- POST `/auth/register`
-- POST `/auth/login`
-- GET `/auth/me`
-- GET `/cv`
-- POST `/cv/upload`
-- POST `/profile/extract/:cvId`
+- POST `/api/auth/register`
+- POST `/api/auth/login`
+- GET `/api/auth/me`
+- GET `/api/cv`
+- POST `/api/cv/upload`
+- POST `/api/profile/extract/:cvId`
+- PATCH `/api/profile/:profileId`
+- POST `/api/tinyfish/run`
+- GET `/api/opportunities`
+- POST `/api/opportunities/import`
+- GET `/api/applications`
+- POST `/api/applications`
+- PATCH `/api/applications/:id`
+- GET `/api/documents`
+- POST `/api/documents`
+- DELETE `/api/documents/:id`
 
 ## Environment
 See `.env.example` for required variables.

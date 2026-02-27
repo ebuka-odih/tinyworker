@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev:server": "tsx server/index.ts",
+    "dev:backend": "npm --prefix backend run start:dev",
     "dev:client": "vite --port=3000 --host=0.0.0.0",
-    "dev": "bash -lc 'npm run dev:server & npm run dev:client'",
+    "dev": "bash -lc 'npm run dev:backend & npm run dev:client'",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "NODE_ENV=production tsx server/index.ts",
+    "start": "npm --prefix backend run start:prod",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },

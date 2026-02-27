@@ -25,6 +25,35 @@ export interface TinyfishSseEvent {
   resultJson?: any
 }
 
+export interface AuthUser {
+  userId: string
+  email: string
+}
+
+export interface CandidateProfile {
+  id: string
+  cvId?: string | null
+  name?: string | null
+  titleHeadline?: string | null
+  seniorityGuess?: string | null
+  yearsExperienceGuess?: number | null
+  roles?: any
+  skills?: any
+  toolsStack?: any
+  industries?: any
+  achievements?: any
+  education?: any
+  certifications?: any
+  keywords?: any
+  preferredRoles?: any
+  preferredLocations?: any
+  links?: any
+  redFlags?: any
+  status?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface UserProfile {
   name?: string
   email?: string
@@ -79,6 +108,8 @@ export interface Application {
   tailoredCVId?: string
   coverLetterId?: string
   notes?: string
+  opportunity?: Opportunity
+  createdAt?: string
   updatedAt: string
 }
 

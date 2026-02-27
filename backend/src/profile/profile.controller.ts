@@ -1,8 +1,32 @@
-import { Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common'
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common'
+import { z } from 'zod'
 import { JwtAuthGuard } from '../auth/jwt.guard'
 import { PrismaService } from '../prisma/prisma.service'
 import { extractTextFromFile } from '../cv/text-extract'
 import { extractCandidateProfileFromCvText } from './profile-extractor'
+
+const UpdateProfileSchema = z.object({
+  preferredRoles: z.array(z.string().min(1)).optional(),
+  preferredLocations: z.array(z.string().min(1)).optional(),
+  links: z
+    .object({
+      github: z.string().optional().nullable(),
+      linkedin: z.string().optional().nullable(),
+      portfolio: z.string().optional().nullable(),
+    })
+    .optional(),
+})
 
 @Controller('profile')
 @UseGuards(JwtAuthGuard)
@@ -64,5 +88,30 @@ export class ProfileController {
     })
 
     return { ok: true, profile }
+  }
+
+  @Patch(':profileId')
+  async updateProfile(@Param('profileId') profileId: string, @Req() req: any, @Body() body: any) {
+    const userId = req.user.userId as string
+    const existing = await this.prisma.candidateProfile.findFirst({ where: { id: profileId, userId } })
+    if (!existing) throw new NotFoundException('Profile not found')
+
+    let data: z.infer<typeof UpdateProfileSchema>
+    try {
+      data = UpdateProfileSchema.parse(body || {})
+    } catch (e: any) {
+      throw new BadRequestException({ error: 'Invalid input', details: e?.issues || e?.message })
+    }
+
+    const updated = await this.prisma.candidateProfile.update({
+      where: { id: profileId },
+      data: {
+        preferredRoles: data.preferredRoles ?? undefined,
+        preferredLocations: data.preferredLocations ?? undefined,
+        links: data.links ?? undefined,
+      },
+    })
+
+    return { ok: true, profile: updated }
   }
 }

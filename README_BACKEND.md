@@ -8,15 +8,25 @@ Backend has been imported from the TinyFinder monorepo into `./backend/`.
 cd backend
 cp .env.example .env
 # set DATABASE_URL + JWT_SECRET
-pnpm install
-pnpm prisma migrate dev
-pnpm start:dev
+npm install
+npx prisma migrate dev
+npm run start:dev
 ```
 
 ## Endpoints
-- POST /auth/register
-- POST /auth/login
-- GET /auth/me
-- GET /cv
-- POST /cv/upload
-- POST /profile/extract/:cvId (PATH A: pdf/docx -> text locally -> TinyFish structures JSON)
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
+- GET /api/cv
+- POST /api/cv/upload
+- POST /api/profile/extract/:cvId (PATH A: pdf/docx -> text locally -> TinyFish structures JSON)
+- PATCH /api/profile/:profileId
+- POST /api/tinyfish/run
+- GET /api/opportunities
+- POST /api/opportunities/import
+- GET /api/applications
+- POST /api/applications
+- PATCH /api/applications/:id
+- GET /api/documents
+- POST /api/documents
+- DELETE /api/documents/:id
