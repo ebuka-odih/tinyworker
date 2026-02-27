@@ -1,4 +1,11 @@
-import { BadRequestException, Body, Controller, Post, UseGuards } from '@nestjs/common'
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Post,
+  ServiceUnavailableException,
+  UseGuards,
+} from '@nestjs/common'
 import { z } from 'zod'
 import { JwtAuthGuard } from '../auth/jwt.guard'
 import { runTinyfish, TinyfishRunRequest } from './tinyfish.client'
@@ -33,8 +40,16 @@ export class TinyfishController {
       throw new BadRequestException({ error: 'Invalid input', details: e?.issues || e?.message })
     }
 
-    const evt = await runTinyfish(parsed)
-    return evt
+    try {
+      const evt = await runTinyfish(parsed)
+      return evt
+    } catch (e: any) {
+      const details = e?.message || String(e)
+      const missingKey = String(details).includes('Missing TinyFish API key')
+      throw new ServiceUnavailableException({
+        error: missingKey ? 'TinyFish API key is not configured on backend' : 'TinyFish is unavailable',
+        details,
+      })
+    }
   }
 }
-

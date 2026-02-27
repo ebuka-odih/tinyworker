@@ -14,7 +14,10 @@ import { z } from 'zod'
 import { JwtAuthGuard } from '../auth/jwt.guard'
 import { PrismaService } from '../prisma/prisma.service'
 import { extractTextFromFile } from '../cv/text-extract'
-import { extractCandidateProfileFromCvText } from './profile-extractor'
+import {
+  buildFallbackCandidateProfileFromCvText,
+  extractCandidateProfileFromCvText,
+} from './profile-extractor'
 
 const UpdateProfileSchema = z.object({
   preferredRoles: z.array(z.string().min(1)).optional(),
@@ -48,12 +51,35 @@ export class ProfileController {
     const userId = req.user.userId as string
 
     const cv = await this.prisma.cV.findFirst({ where: { id: cvId, userId } })
-    if (!cv) return { error: 'CV not found' }
+    if (!cv) throw new NotFoundException('CV not found')
 
     // Extract text locally (cheap and reliable), then ask TinyFish to structure into JSON.
-    const text = await extractTextFromFile(cv.storagePath, cv.mimeType || undefined)
+    let text = ''
+    try {
+      text = await extractTextFromFile(cv.storagePath, cv.mimeType || undefined)
+    } catch (e: any) {
+      throw new BadRequestException({
+        error: 'Failed to extract text from CV',
+        details: e?.message || String(e),
+      })
+    }
 
-    const result = await extractCandidateProfileFromCvText(text)
+    let result: any = null
+    let extractionMethod: 'tinyfish' | 'fallback' = 'tinyfish'
+    let extractionWarning: string | null = null
+
+    try {
+      result = await extractCandidateProfileFromCvText(text)
+      if (!result || typeof result !== 'object') {
+        extractionMethod = 'fallback'
+        extractionWarning = 'TinyFish returned an empty profile payload'
+        result = buildFallbackCandidateProfileFromCvText(text, extractionWarning)
+      }
+    } catch (e: any) {
+      extractionMethod = 'fallback'
+      extractionWarning = e?.message || 'TinyFish extraction failed'
+      result = buildFallbackCandidateProfileFromCvText(text, extractionWarning)
+    }
 
     const profile = await this.prisma.candidateProfile.create({
       data: {
@@ -87,7 +113,14 @@ export class ProfileController {
       },
     })
 
-    return { ok: true, profile }
+    return {
+      ok: true,
+      profile,
+      extraction: {
+        method: extractionMethod,
+        warning: extractionWarning,
+      },
+    }
   }
 
   @Patch(':profileId')

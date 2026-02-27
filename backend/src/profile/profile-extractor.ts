@@ -53,3 +53,98 @@ ${trimmed}
   }
   return rj
 }
+
+type FallbackLinks = {
+  github: string | null
+  linkedin: string | null
+  portfolio: string | null
+}
+
+function detectLinks(text: string): FallbackLinks {
+  const links: FallbackLinks = { github: null, linkedin: null, portfolio: null }
+  const matches = text.match(/(?:https?:\/\/|www\.)[^\s)]+/gi) || []
+  for (const raw of matches) {
+    const normalized = raw.startsWith('http') ? raw : `https://${raw}`
+    const lower = normalized.toLowerCase()
+    if (!links.github && lower.includes('github.com')) links.github = normalized
+    else if (!links.linkedin && lower.includes('linkedin.com')) links.linkedin = normalized
+    else if (!links.portfolio) links.portfolio = normalized
+  }
+  return links
+}
+
+function inferName(lines: string[]): string | null {
+  const candidate = lines.find((line) => /^[a-z ,.'-]{3,80}$/i.test(line) && line.split(/\s+/).length <= 5)
+  return candidate || null
+}
+
+function inferYearsExperience(text: string): number | null {
+  const match = text.match(/(\d{1,2})\s*\+?\s*(?:years?|yrs?)/i)
+  if (!match) return null
+  const years = Number(match[1])
+  if (!Number.isFinite(years)) return null
+  return years
+}
+
+const KNOWN_TERMS = [
+  'typescript',
+  'javascript',
+  'react',
+  'next.js',
+  'node.js',
+  'nestjs',
+  'express',
+  'python',
+  'java',
+  'c#',
+  'php',
+  'sql',
+  'postgresql',
+  'mysql',
+  'mongodb',
+  'docker',
+  'kubernetes',
+  'aws',
+  'azure',
+  'gcp',
+  'graphql',
+  'rest',
+  'git',
+  'ci/cd',
+]
+
+function inferTerms(text: string): string[] {
+  const lower = text.toLowerCase()
+  return KNOWN_TERMS.filter((term) => lower.includes(term))
+}
+
+export function buildFallbackCandidateProfileFromCvText(cvText: string, warning?: string | null) {
+  const trimmed = String(cvText || '').trim()
+  const lines = trimmed
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 30)
+
+  const name = inferName(lines)
+  const years = inferYearsExperience(trimmed)
+  const terms = inferTerms(trimmed)
+  const links = detectLinks(trimmed)
+
+  return {
+    name,
+    title_headline: lines.find((line) => line !== name && line.length >= 12 && line.length <= 100) || null,
+    seniority_guess: years && years >= 7 ? 'senior' : years && years >= 3 ? 'mid' : years ? 'junior' : null,
+    years_experience_guess: years,
+    roles: [],
+    skills: terms.slice(0, 12).map((term) => ({ name: term, confidence: 0.45, evidence: [] as string[] })),
+    tools_stack: terms,
+    industries: [],
+    achievements: [],
+    education: [],
+    certifications: [],
+    keywords: terms,
+    links,
+    red_flags: warning ? [{ type: 'partial_extraction', note: warning }] : [],
+  }
+}
