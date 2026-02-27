@@ -1,6 +1,10 @@
 {
   "routes": [
     {
+      "src": "/api/(.*)",
+      "dest": "https://tinyworker-production.up.railway.app/api/$1"
+    },
+    {
       "handle": "filesystem"
     },
     {
