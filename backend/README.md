@@ -46,3 +46,8 @@ npm run start:dev
 
 ## Environment
 See `.env.example` for required variables.
+
+For LinkedIn profile import reliability, TinyFish is configured to use `stealth` profile and proxy by default:
+- `TINYFISH_LINKEDIN_BROWSER_PROFILE` (`stealth` recommended)
+- `TINYFISH_LINKEDIN_PROXY_ENABLED` (`true` recommended)
+- `TINYFISH_LINKEDIN_PROXY_COUNTRY` (optional, e.g. `US`)

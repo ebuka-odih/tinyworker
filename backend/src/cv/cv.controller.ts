@@ -28,6 +28,16 @@ function ensureDir(p: string) {
 }
 
 const UPLOAD_ROOT = process.env.CV_UPLOAD_DIR || path.join(process.cwd(), 'data', 'uploads')
+const LINKEDIN_BROWSER_PROFILE: 'lite' | 'stealth' =
+  String(process.env.TINYFISH_LINKEDIN_BROWSER_PROFILE || '').toLowerCase() === 'lite'
+    ? 'lite'
+    : 'stealth'
+const LINKEDIN_PROXY_ENABLED = /^(1|true|yes)$/i.test(
+  String(process.env.TINYFISH_LINKEDIN_PROXY_ENABLED ?? 'true'),
+)
+const LINKEDIN_PROXY_COUNTRY = String(process.env.TINYFISH_LINKEDIN_PROXY_COUNTRY || '')
+  .trim()
+  .toUpperCase()
 
 const LinkedinImportSchema = z.object({
   linkedinUrl: z
@@ -82,6 +92,14 @@ function buildExtractedTextFromLinkedinResult(result: any): string {
 
 function safeFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'linkedin_profile'
+}
+
+function buildProxyConfig(enabled: boolean): { enabled: boolean; country_code?: string } {
+  if (!enabled) return { enabled: false }
+  return {
+    enabled: true,
+    ...(LINKEDIN_PROXY_COUNTRY ? { country_code: LINKEDIN_PROXY_COUNTRY } : {}),
+  }
 }
 
 @Controller('cv')
@@ -239,23 +257,51 @@ Rules:
 `
 
     let result: any = null
-    try {
-      const evt = await runTinyfish({
-        url: linkedinUrl,
-        goal,
-        browser_profile: 'lite',
-        proxy_config: { enabled: false },
-      })
-      result = normalizeResultJson(evt?.resultJson)
-    } catch (e: any) {
-      throw new ServiceUnavailableException({
-        error: 'LinkedIn import is unavailable right now',
-        details: e?.message || String(e),
+    let attemptLabel = `${LINKEDIN_BROWSER_PROFILE}:${LINKEDIN_PROXY_ENABLED ? 'proxy' : 'direct'}`
+    const attempts: Array<{ browser_profile: 'lite' | 'stealth'; proxy: boolean; label: string }> = [
+      {
+        browser_profile: LINKEDIN_BROWSER_PROFILE,
+        proxy: LINKEDIN_PROXY_ENABLED,
+        label: attemptLabel,
+      },
+    ]
+    const needsFallback =
+      LINKEDIN_BROWSER_PROFILE !== 'stealth' || !LINKEDIN_PROXY_ENABLED
+    if (needsFallback) {
+      attempts.push({
+        browser_profile: 'stealth',
+        proxy: true,
+        label: 'stealth:proxy-fallback',
       })
     }
 
+    let lastError: any = null
+    for (const attempt of attempts) {
+      try {
+        const evt = await runTinyfish({
+          url: linkedinUrl,
+          goal,
+          browser_profile: attempt.browser_profile,
+          proxy_config: buildProxyConfig(attempt.proxy),
+        })
+        const normalized = normalizeResultJson(evt?.resultJson)
+        if (normalized && typeof normalized === 'object') {
+          result = normalized
+          attemptLabel = attempt.label
+          break
+        }
+        lastError = new Error('LinkedIn import returned an empty result payload')
+      } catch (e: any) {
+        lastError = e
+      }
+    }
+
     if (!result || typeof result !== 'object') {
-      throw new ServiceUnavailableException('LinkedIn import returned an empty profile payload')
+      throw new ServiceUnavailableException({
+        error: 'LinkedIn import is unavailable right now',
+        details: lastError?.message || String(lastError || 'Unknown TinyFish error'),
+        attempts: attempts.map((a) => a.label),
+      })
     }
 
     const extractedText = buildExtractedTextFromLinkedinResult(result)
@@ -335,7 +381,7 @@ Rules:
       cv,
       profile,
       extraction: {
-        method: 'tinyfish-linkedin',
+        method: `tinyfish-linkedin:${attemptLabel}`,
         warning: unavailableReason || null,
       },
     }
