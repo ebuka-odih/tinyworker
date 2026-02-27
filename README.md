@@ -63,6 +63,7 @@ npm run start:dev
 - `GET /api/auth/me`
 - `GET /api/cv`
 - `POST /api/cv/upload`
+- `POST /api/cv/import-linkedin`
 - `POST /api/profile/extract/:cvId`
 - `PATCH /api/profile/:profileId`
 - `POST /api/tinyfish/run`

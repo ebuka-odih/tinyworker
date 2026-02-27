@@ -5,6 +5,7 @@ Backend API for TinyWorker (job discovery + CV profile extraction + tailoring wo
 ## What it does
 - User auth (JWT)
 - CV upload (PDF/DOCX)
+- LinkedIn profile import to bootstrap CV/profile (via TinyFish)
 - Profile extraction (PATH A):
   - Extract text locally (PDF via `pdftotext`, DOCX via `mammoth`)
   - Structure into CandidateProfile JSON using local parser by default
@@ -26,6 +27,7 @@ npm run start:dev
 - GET `/api/auth/me`
 - GET `/api/cv`
 - POST `/api/cv/upload`
+- POST `/api/cv/import-linkedin`
 - POST `/api/profile/extract/:cvId`
 - PATCH `/api/profile/:profileId`
 - POST `/api/tinyfish/run`

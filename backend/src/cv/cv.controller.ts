@@ -1,8 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
   Post,
   Req,
+  ServiceUnavailableException,
   UseGuards,
   UploadedFile,
   UseInterceptors,
@@ -13,16 +15,74 @@ import { diskStorage } from 'multer'
 import type { Request } from 'express'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
+import { z } from 'zod'
 
 import { JwtAuthGuard } from '../auth/jwt.guard'
 import { PrismaService } from '../prisma/prisma.service'
 import { extractTextFromFile } from './text-extract'
+import { runTinyfish } from '../tinyfish/tinyfish.client'
+import { buildFallbackCandidateProfileFromCvText } from '../profile/profile-extractor'
 
 function ensureDir(p: string) {
   fs.mkdirSync(p, { recursive: true })
 }
 
 const UPLOAD_ROOT = process.env.CV_UPLOAD_DIR || path.join(process.cwd(), 'data', 'uploads')
+
+const LinkedinImportSchema = z.object({
+  linkedinUrl: z
+    .string()
+    .url()
+    .refine((value) => {
+      try {
+        const u = new URL(value)
+        return u.hostname.toLowerCase().includes('linkedin.com')
+      } catch {
+        return false
+      }
+    }, 'Must be a valid LinkedIn URL'),
+})
+
+function normalizeResultJson(resultJson: any): any {
+  if (!resultJson) return null
+  if (typeof resultJson === 'string') {
+    try {
+      return JSON.parse(resultJson)
+    } catch {
+      return null
+    }
+  }
+  if (typeof resultJson === 'object') return resultJson
+  return null
+}
+
+function toStringArray(value: any): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => String(entry ?? '').trim())
+    .filter(Boolean)
+}
+
+function buildExtractedTextFromLinkedinResult(result: any): string {
+  const preferredText = String(result?.resume_text || result?.raw_text || '').trim()
+  if (preferredText) return preferredText
+
+  const chunks = [
+    String(result?.name || ''),
+    String(result?.title_headline || ''),
+    ...toStringArray(result?.achievements),
+    ...toStringArray(result?.keywords),
+  ]
+  return chunks
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
+function safeFilename(input: string): string {
+  return input.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'linkedin_profile'
+}
 
 @Controller('cv')
 @UseGuards(JwtAuthGuard)
@@ -109,5 +169,175 @@ export class CvController {
     })
 
     return { ok: true, cv: rec }
+  }
+
+  @Post('import-linkedin')
+  async importFromLinkedin(@Body() body: any, @Req() req: any) {
+    const userId = req.user.userId as string
+
+    let parsed: z.infer<typeof LinkedinImportSchema>
+    try {
+      parsed = LinkedinImportSchema.parse(body || {})
+    } catch (e: any) {
+      throw new BadRequestException({ error: 'Invalid input', details: e?.issues || e?.message })
+    }
+
+    const linkedinUrl = parsed.linkedinUrl.trim()
+    const linkedinStoragePath = `linkedin:${linkedinUrl}`
+
+    const existingCv = await this.prisma.cV.findFirst({
+      where: { userId, storagePath: linkedinStoragePath },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        filename: true,
+        mimeType: true,
+        sizeBytes: true,
+        createdAt: true,
+      },
+    })
+    if (existingCv) {
+      const existingProfile = await this.prisma.candidateProfile.findFirst({
+        where: { userId, cvId: existingCv.id },
+        orderBy: { createdAt: 'desc' },
+      })
+      return {
+        ok: true,
+        cv: existingCv,
+        profile: existingProfile || null,
+        extraction: { method: 'cached-linkedin', warning: null },
+      }
+    }
+
+    const goal = `Open this LinkedIn profile URL and extract candidate profile details.
+
+Return STRICT JSON with this schema:
+{
+  "name": string|null,
+  "title_headline": string|null,
+  "seniority_guess": string|null,
+  "years_experience_guess": number|null,
+  "roles": [{"title": string, "company": string|null, "dates": string|null, "highlights": string[]}],
+  "skills": [{"name": string, "confidence": number, "evidence": string[]}],
+  "tools_stack": string[],
+  "industries": string[],
+  "achievements": string[],
+  "education": any[],
+  "certifications": string[],
+  "keywords": string[],
+  "links": {"github": string|null, "linkedin": string|null, "portfolio": string|null},
+  "red_flags": [{"type": string, "note": string}],
+  "resume_text": string|null,
+  "raw_text": string|null,
+  "unavailable_reason": string|null
+}
+
+Rules:
+- Do not fabricate any missing information.
+- If content cannot be accessed, set unavailable_reason with why.
+- Confidence values must be in range 0..1.
+`
+
+    let result: any = null
+    try {
+      const evt = await runTinyfish({
+        url: linkedinUrl,
+        goal,
+        browser_profile: 'lite',
+        proxy_config: { enabled: false },
+      })
+      result = normalizeResultJson(evt?.resultJson)
+    } catch (e: any) {
+      throw new ServiceUnavailableException({
+        error: 'LinkedIn import is unavailable right now',
+        details: e?.message || String(e),
+      })
+    }
+
+    if (!result || typeof result !== 'object') {
+      throw new ServiceUnavailableException('LinkedIn import returned an empty profile payload')
+    }
+
+    const extractedText = buildExtractedTextFromLinkedinResult(result)
+    const unavailableReason = String(result?.unavailable_reason || '').trim()
+    if (!extractedText && unavailableReason) {
+      throw new BadRequestException({
+        error: 'Could not read LinkedIn profile content',
+        details: unavailableReason,
+      })
+    }
+
+    const fallbackWarning = unavailableReason || 'Generated from LinkedIn profile'
+    const profileSeed = extractedText
+      ? result
+      : buildFallbackCandidateProfileFromCvText('', fallbackWarning)
+
+    const normalizedLinks = {
+      github: profileSeed?.links?.github ?? null,
+      linkedin: profileSeed?.links?.linkedin ?? linkedinUrl,
+      portfolio: profileSeed?.links?.portfolio ?? null,
+    }
+
+    const accessToken = `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+    const host = (() => {
+      try {
+        return safeFilename(new URL(linkedinUrl).pathname.replaceAll('/', '_'))
+      } catch {
+        return 'linkedin_profile'
+      }
+    })()
+
+    const cv = await this.prisma.cV.create({
+      data: {
+        userId,
+        filename: `LinkedIn_${host}.txt`,
+        mimeType: 'text/x-linkedin-profile',
+        sizeBytes: extractedText.length || null,
+        storagePath: linkedinStoragePath,
+        extractedText: extractedText || null,
+        keywords: profileSeed?.keywords ?? null,
+        accessToken,
+      },
+      select: {
+        id: true,
+        filename: true,
+        mimeType: true,
+        sizeBytes: true,
+        createdAt: true,
+      },
+    })
+
+    const profile = await this.prisma.candidateProfile.create({
+      data: {
+        userId,
+        cvId: cv.id,
+        source: 'linkedin',
+        status: 'ready',
+        name: profileSeed?.name ?? null,
+        titleHeadline: profileSeed?.title_headline ?? null,
+        seniorityGuess: profileSeed?.seniority_guess ?? null,
+        yearsExperienceGuess: profileSeed?.years_experience_guess ?? null,
+        roles: profileSeed?.roles ?? null,
+        skills: profileSeed?.skills ?? null,
+        toolsStack: profileSeed?.tools_stack ?? null,
+        industries: profileSeed?.industries ?? null,
+        achievements: profileSeed?.achievements ?? null,
+        education: profileSeed?.education ?? null,
+        certifications: profileSeed?.certifications ?? null,
+        keywords: profileSeed?.keywords ?? null,
+        links: normalizedLinks,
+        redFlags: profileSeed?.red_flags ?? null,
+      },
+    })
+
+    return {
+      ok: true,
+      cv,
+      profile,
+      extraction: {
+        method: 'tinyfish-linkedin',
+        warning: unavailableReason || null,
+      },
+    }
   }
 }

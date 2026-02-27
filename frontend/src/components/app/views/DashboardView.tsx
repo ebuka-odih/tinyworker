@@ -5,6 +5,7 @@ import {
   Edit3,
   ExternalLink,
   FileText,
+  Linkedin,
   Plus,
   Search,
   Sparkles,
@@ -26,6 +27,7 @@ export function DashboardView({
   cvError,
   profileError,
   onUploadCv,
+  onImportLinkedinCv,
   onExtractProfile,
   onCreateApplication,
   onCreateDocument,
@@ -41,6 +43,7 @@ export function DashboardView({
   cvError: string | null
   profileError: string | null
   onUploadCv: (file: File) => Promise<void>
+  onImportLinkedinCv: (linkedinUrl: string) => Promise<void>
   onExtractProfile: (cvId: string) => Promise<void>
   onCreateApplication: (opportunityId: string, status?: Application['status']) => Promise<void>
   onCreateDocument: (doc: Pick<Document, 'type' | 'title' | 'content' | 'opportunityId'>) => Promise<void>
@@ -53,6 +56,7 @@ export function DashboardView({
   const [targetTone, setTargetTone] = useState('Professional')
   const [isRevamping, setIsRevamping] = useState(false)
   const [revampResult, setRevampResult] = useState<string | null>(null)
+  const [linkedinUrlInput, setLinkedinUrlInput] = useState('')
   const latestProfile = profiles[0]
   const cvFileInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -145,6 +149,36 @@ export function DashboardView({
           <span className="text-xs font-bold text-slate-700">Find Jobs</span>
         </button>
       </div>
+
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-8 h-8 bg-sky-50 text-sky-600 rounded-lg flex items-center justify-center">
+            <Linkedin size={16} />
+          </div>
+          <div className="text-sm font-bold text-slate-800">Or build from LinkedIn profile</div>
+        </div>
+        <form
+          className="flex flex-col sm:flex-row gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault()
+            const value = linkedinUrlInput.trim()
+            if (!value) return
+            await onImportLinkedinCv(value)
+            setLinkedinUrlInput('')
+          }}
+        >
+          <input
+            type="url"
+            value={linkedinUrlInput}
+            onChange={(e) => setLinkedinUrlInput(e.target.value)}
+            placeholder="https://www.linkedin.com/in/your-profile"
+            className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none text-sm"
+          />
+          <Button type="submit" disabled={isLoading || !linkedinUrlInput.trim()} className="sm:w-auto">
+            {isLoading ? 'Importing...' : 'Import LinkedIn'}
+          </Button>
+        </form>
+      </Card>
 
       {cvError ? (
         <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm">{cvError}</div>

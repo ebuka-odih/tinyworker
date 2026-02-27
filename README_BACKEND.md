@@ -19,6 +19,7 @@ npm run start:dev
 - GET /api/auth/me
 - GET /api/cv
 - POST /api/cv/upload
+- POST /api/cv/import-linkedin
 - POST /api/profile/extract/:cvId (PATH A: pdf/docx -> text locally -> TinyFish structures JSON)
 - PATCH /api/profile/:profileId
 - POST /api/tinyfish/run

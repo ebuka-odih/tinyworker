@@ -168,6 +168,41 @@ export default function App() {
     }
   }
 
+  const importCvFromLinkedin = async (linkedinUrl: string) => {
+    if (!accessToken) {
+      setCvError('Please sign in first.')
+      navigate('/auth')
+      return
+    }
+    setCvError(null)
+    setProfileError(null)
+    setIsLoading(true)
+    try {
+      const res = await authedFetch('/api/cv/import-linkedin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linkedinUrl }),
+      })
+      if (!res.ok) {
+        const raw = await res.text().catch(() => '')
+        try {
+          const parsed = raw ? JSON.parse(raw) : null
+          const msg = parsed?.error || parsed?.message || raw
+          throw new Error(msg || 'LinkedIn import failed')
+        } catch {
+          throw new Error(raw || 'LinkedIn import failed')
+        }
+      }
+      await loadCvs()
+      await loadProfiles()
+      navigate('/profile-review')
+    } catch (e: any) {
+      setCvError(e?.message || 'LinkedIn import failed')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const loadProfiles = async () => {
     if (!accessToken) {
       setProfiles([])
@@ -486,6 +521,7 @@ export default function App() {
                       cvError={cvError}
                       profileError={profileError}
                       onUploadCv={uploadCv}
+                      onImportLinkedinCv={importCvFromLinkedin}
                       onExtractProfile={extractProfileFromCv}
                       onCreateApplication={createApplication}
                       onCreateDocument={createDocument}

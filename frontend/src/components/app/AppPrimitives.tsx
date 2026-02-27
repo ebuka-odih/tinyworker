@@ -43,6 +43,7 @@ export const Modal = ({
 export const Button = ({
   children,
   onClick,
+  type = 'button',
   variant = 'primary',
   className = '',
   disabled = false,
@@ -50,6 +51,7 @@ export const Button = ({
 }: {
   children: React.ReactNode
   onClick?: () => void
+  type?: 'button' | 'submit' | 'reset'
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger'
   className?: string
   disabled?: boolean
@@ -75,6 +77,7 @@ export const Button = ({
 
   return (
     <ShadButton
+      type={type}
       variant={mapVariant(variant)}
       onClick={onClick}
       disabled={disabled}
