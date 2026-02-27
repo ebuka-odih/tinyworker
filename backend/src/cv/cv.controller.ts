@@ -16,6 +16,7 @@ import * as fs from 'node:fs'
 
 import { JwtAuthGuard } from '../auth/jwt.guard'
 import { PrismaService } from '../prisma/prisma.service'
+import { extractTextFromFile } from './text-extract'
 
 function ensureDir(p: string) {
   fs.mkdirSync(p, { recursive: true })
@@ -76,6 +77,15 @@ export class CvController {
     if (!file) throw new BadRequestException('Missing file')
 
     const userId = req.user.userId as string
+    let extractedText = ''
+    try {
+      extractedText = await extractTextFromFile(file.path, file.mimetype || undefined)
+    } catch (e: any) {
+      throw new BadRequestException({
+        error: 'Failed to extract text from uploaded CV',
+        details: e?.message || String(e),
+      })
+    }
 
     const accessToken = `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
 
@@ -86,6 +96,7 @@ export class CvController {
         mimeType: file.mimetype,
         sizeBytes: file.size,
         storagePath: file.path,
+        extractedText,
         accessToken,
       },
       select: {

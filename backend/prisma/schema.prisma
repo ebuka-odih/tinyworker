@@ -132,3 +132,33 @@ model Document {
   @@index([userId, createdAt])
   @@index([type])
 }
+
+model TelegramTask {
+  id                  String   @id @default(uuid())
+  chatId              String
+  telegramUserId      String?
+  telegramUsername    String?
+  telegramDisplayName String?
+  messageId           String?
+  text                String   @db.Text
+  status              String   @default("open") // open|done
+  source              String   @default("telegram") // telegram|api
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  completedAt         DateTime?
+
+  @@index([chatId, createdAt])
+  @@index([status, createdAt])
+  @@unique([chatId, messageId])
+}
+
+model TelegramReport {
+  id                String   @id @default(uuid())
+  chatId            String
+  message           String   @db.Text
+  sentByUserId      String?
+  telegramMessageId String?
+  createdAt         DateTime @default(now())
+
+  @@index([chatId, createdAt])
+}

@@ -30,3 +30,7 @@ npm run start:dev
 - GET /api/documents
 - POST /api/documents
 - DELETE /api/documents/:id
+- POST /api/telegram/webhook
+- GET /api/telegram/tasks
+- POST /api/telegram/report
+- PATCH /api/telegram/tasks/:id

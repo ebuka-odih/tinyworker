@@ -7,7 +7,8 @@ Backend API for TinyWorker (job discovery + CV profile extraction + tailoring wo
 - CV upload (PDF/DOCX)
 - Profile extraction (PATH A):
   - Extract text locally (PDF via `pdftotext`, DOCX via `mammoth`)
-  - Use TinyFish to structure into a CandidateProfile JSON (skills/roles/keywords)
+  - Structure into CandidateProfile JSON using local parser by default
+  - Optional: enable TinyFish structuring with `PROFILE_USE_TINYFISH=true`
 
 ## Setup
 
@@ -36,6 +37,10 @@ npm run start:dev
 - GET `/api/documents`
 - POST `/api/documents`
 - DELETE `/api/documents/:id`
+- POST `/api/telegram/webhook`
+- GET `/api/telegram/tasks`
+- POST `/api/telegram/report`
+- PATCH `/api/telegram/tasks/:id`
 
 ## Environment
 See `.env.example` for required variables.

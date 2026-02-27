@@ -74,8 +74,32 @@ npm run start:dev
 - `GET /api/documents`
 - `POST /api/documents`
 - `DELETE /api/documents/:id`
+- `POST /api/telegram/webhook`
+- `GET /api/telegram/tasks`
+- `POST /api/telegram/report`
+- `PATCH /api/telegram/tasks/:id`
 
 ## Notes
 - The backend uses a cost-efficient approach for CV processing:
   - Convert PDF/DOCX → text locally
   - Use TinyFish to structure the text into CandidateProfile JSON
+
+## Telegram task bot
+- Configure `TELEGRAM_BOT_TOKEN` in `backend/.env`.
+- Optional but recommended:
+  - `TELEGRAM_WEBHOOK_SECRET` for webhook verification.
+  - `TELEGRAM_DEFAULT_CHAT_ID` for report delivery target.
+  - `TELEGRAM_ALLOWED_CHAT_IDS` (comma separated) to allowlist inbound chats.
+- Register webhook:
+
+```bash
+curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://<your-domain>/api/telegram/webhook","secret_token":"<your-webhook-secret>"}'
+```
+
+- Telegram commands:
+  - `/task <text>` create a task
+  - `/tasks` list open tasks
+  - `/done <task-id-prefix>` mark done
+  - Plain text messages are also saved as open tasks.

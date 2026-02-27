@@ -11,6 +11,7 @@ import { TinyfishModule } from './tinyfish/tinyfish.module'
 import { OpportunitiesModule } from './opportunities/opportunities.module'
 import { ApplicationsModule } from './applications/applications.module'
 import { DocumentsModule } from './documents/documents.module'
+import { TelegramModule } from './telegram/telegram.module'
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { DocumentsModule } from './documents/documents.module'
     OpportunitiesModule,
     ApplicationsModule,
     DocumentsModule,
+    TelegramModule,
   ],
   controllers: [AppController],
   providers: [AppService],

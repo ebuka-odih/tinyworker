@@ -19,6 +19,10 @@ import {
   extractCandidateProfileFromCvText,
 } from './profile-extractor'
 
+const USE_TINYFISH_FOR_PROFILE_EXTRACTION = /^(1|true|yes)$/i.test(
+  String(process.env.PROFILE_USE_TINYFISH || ''),
+)
+
 const UpdateProfileSchema = z.object({
   preferredRoles: z.array(z.string().min(1)).optional(),
   preferredLocations: z.array(z.string().min(1)).optional(),
@@ -53,31 +57,58 @@ export class ProfileController {
     const cv = await this.prisma.cV.findFirst({ where: { id: cvId, userId } })
     if (!cv) throw new NotFoundException('CV not found')
 
-    // Extract text locally (cheap and reliable), then ask TinyFish to structure into JSON.
-    let text = ''
-    try {
-      text = await extractTextFromFile(cv.storagePath, cv.mimeType || undefined)
-    } catch (e: any) {
-      throw new BadRequestException({
-        error: 'Failed to extract text from CV',
-        details: e?.message || String(e),
-      })
+    const existingProfile = await this.prisma.candidateProfile.findFirst({
+      where: { userId, cvId: cv.id },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (existingProfile) {
+      return {
+        ok: true,
+        profile: existingProfile,
+        extraction: {
+          method: 'cached',
+          warning: null,
+        },
+      }
+    }
+
+    // Prefer cached text (durable in DB) to avoid depending on ephemeral container files.
+    let text = String(cv.extractedText || '').trim()
+    if (!text) {
+      try {
+        text = await extractTextFromFile(cv.storagePath, cv.mimeType || undefined)
+      } catch (e: any) {
+        const missingFile =
+          e?.code === 'ENOENT' || String(e?.message || '').includes('no such file or directory')
+        throw new BadRequestException({
+          error: missingFile
+            ? 'CV source file is no longer available on server; re-upload the CV once to cache its text'
+            : 'Failed to extract text from CV',
+          details: e?.message || String(e),
+        })
+      }
     }
 
     let result: any = null
-    let extractionMethod: 'tinyfish' | 'fallback' = 'tinyfish'
+    let extractionMethod: 'tinyfish' | 'fallback' | 'cached' = 'tinyfish'
     let extractionWarning: string | null = null
 
-    try {
-      result = await extractCandidateProfileFromCvText(text)
-      if (!result || typeof result !== 'object') {
+    if (USE_TINYFISH_FOR_PROFILE_EXTRACTION) {
+      try {
+        result = await extractCandidateProfileFromCvText(text)
+        if (!result || typeof result !== 'object') {
+          extractionMethod = 'fallback'
+          extractionWarning = 'TinyFish returned an empty profile payload'
+          result = buildFallbackCandidateProfileFromCvText(text, extractionWarning)
+        }
+      } catch (e: any) {
         extractionMethod = 'fallback'
-        extractionWarning = 'TinyFish returned an empty profile payload'
+        extractionWarning = e?.message || 'TinyFish extraction failed'
         result = buildFallbackCandidateProfileFromCvText(text, extractionWarning)
       }
-    } catch (e: any) {
+    } else {
       extractionMethod = 'fallback'
-      extractionWarning = e?.message || 'TinyFish extraction failed'
+      extractionWarning = 'TinyFish extraction disabled; using local parser'
       result = buildFallbackCandidateProfileFromCvText(text, extractionWarning)
     }
 
