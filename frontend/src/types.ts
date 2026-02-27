@@ -129,3 +129,23 @@ export interface ChatMessage {
   options?: string[]
   results?: Opportunity[]
 }
+
+export type LinkedinImportJobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+
+export interface LinkedinImportJobLog {
+  at: string
+  message: string
+}
+
+export interface LinkedinImportJob {
+  id: string
+  linkedinUrl: string
+  status: LinkedinImportJobStatus
+  stage: string
+  logs: LinkedinImportJobLog[]
+  error: string | null
+  cvId: string | null
+  profileId: string | null
+  createdAt: string
+  updatedAt: string
+}

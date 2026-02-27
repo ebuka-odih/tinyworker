@@ -3,12 +3,13 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Briefcase, FileText, LayoutDashboard, MessageSquare, Settings, Sparkles } from 'lucide-react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
-import { Application, AuthUser, CVData, CandidateProfile, Document, Opportunity } from './types'
+import { Application, AuthUser, CVData, CandidateProfile, Document, LinkedinImportJob, Opportunity } from './types'
 
 import { ApplicationsView } from './components/app/views/ApplicationsView'
 import { AuthView } from './components/app/views/AuthView'
 import { ChatView } from './components/app/views/ChatView'
 import { DashboardView } from './components/app/views/DashboardView'
+import { BuildResumeView } from './components/app/views/BuildResumeView'
 import { DocumentsView } from './components/app/views/DocumentsView'
 import { LandingPage } from './components/app/views/LandingPage'
 import { ProfileReviewView } from './components/app/views/ProfileReviewView'
@@ -27,6 +28,7 @@ export default function App() {
     if (pathname.startsWith('/applications')) return 'applications'
     if (pathname.startsWith('/settings')) return 'settings'
     if (pathname.startsWith('/dashboard')) return 'dashboard'
+    if (pathname.startsWith('/build-resume')) return 'dashboard'
     if (pathname.startsWith('/profile-review')) return 'dashboard'
     if (pathname === '/' || pathname.startsWith('/home')) return 'home'
     return 'dashboard'
@@ -61,6 +63,9 @@ export default function App() {
   const [profileError, setProfileError] = useState<string | null>(null)
   const [isExtractingProfile, setIsExtractingProfile] = useState(false)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [linkedinImportJob, setLinkedinImportJob] = useState<LinkedinImportJob | null>(null)
+  const [linkedinImportError, setLinkedinImportError] = useState<string | null>(null)
+  const [isStartingLinkedinImport, setIsStartingLinkedinImport] = useState(false)
 
   useEffect(() => {
     const next = routeToTab(location.pathname)
@@ -88,6 +93,8 @@ export default function App() {
     setOpportunities([])
     setApplications([])
     setDocuments([])
+    setLinkedinImportJob(null)
+    setLinkedinImportError(null)
     navigate('/auth')
   }
 
@@ -168,15 +175,27 @@ export default function App() {
     }
   }
 
-  const importCvFromLinkedin = async (linkedinUrl: string) => {
+  const readErrorMessage = async (res: Response, fallback: string) => {
+    const raw = await res.text().catch(() => '')
+    if (!raw) return fallback
+    try {
+      const parsed = JSON.parse(raw)
+      return parsed?.error || parsed?.message || raw || fallback
+    } catch {
+      return raw || fallback
+    }
+  }
+
+  const startLinkedinImport = async (linkedinUrl: string) => {
     if (!accessToken) {
-      setCvError('Please sign in first.')
+      setLinkedinImportError('Please sign in first.')
       navigate('/auth')
       return
     }
     setCvError(null)
     setProfileError(null)
-    setIsLoading(true)
+    setLinkedinImportError(null)
+    setIsStartingLinkedinImport(true)
     try {
       const res = await authedFetch('/api/cv/import-linkedin', {
         method: 'POST',
@@ -184,22 +203,39 @@ export default function App() {
         body: JSON.stringify({ linkedinUrl }),
       })
       if (!res.ok) {
-        const raw = await res.text().catch(() => '')
-        try {
-          const parsed = raw ? JSON.parse(raw) : null
-          const msg = parsed?.error || parsed?.message || raw
-          throw new Error(msg || 'LinkedIn import failed')
-        } catch {
-          throw new Error(raw || 'LinkedIn import failed')
-        }
+        throw new Error(await readErrorMessage(res, 'Failed to start LinkedIn import'))
       }
-      await loadCvs()
-      await loadProfiles()
-      navigate('/profile-review')
+      const data = await res.json()
+      const job = data?.job as LinkedinImportJob | undefined
+      if (!job?.id) throw new Error('LinkedIn import started without a job id')
+      setLinkedinImportJob(job)
     } catch (e: any) {
-      setCvError(e?.message || 'LinkedIn import failed')
+      setLinkedinImportError(e?.message || 'Failed to start LinkedIn import')
     } finally {
-      setIsLoading(false)
+      setIsStartingLinkedinImport(false)
+    }
+  }
+
+  const refreshLinkedinImportJob = async (jobId: string) => {
+    if (!accessToken) return
+    try {
+      const res = await authedFetch(`/api/cv/import-linkedin/${jobId}`)
+      if (!res.ok) {
+        throw new Error(await readErrorMessage(res, 'Failed to fetch LinkedIn import status'))
+      }
+      const data = await res.json()
+      const job = data?.job as LinkedinImportJob | undefined
+      if (!job?.id) return
+      setLinkedinImportJob(job)
+      if (job.status === 'succeeded') {
+        setLinkedinImportError(null)
+        await loadCvs()
+        await loadProfiles()
+      } else if (job.status === 'failed') {
+        setLinkedinImportError(job.error || 'LinkedIn import failed')
+      }
+    } catch (e: any) {
+      setLinkedinImportError(e?.message || 'Failed to fetch LinkedIn import status')
     }
   }
 
@@ -522,11 +558,27 @@ export default function App() {
                       cvError={cvError}
                       profileError={profileError}
                       onUploadCv={uploadCv}
-                      onImportLinkedinCv={importCvFromLinkedin}
+                      onOpenBuildResume={() => navigate('/build-resume')}
                       onExtractProfile={extractProfileFromCv}
                       onCreateApplication={createApplication}
                       onCreateDocument={createDocument}
                       onNavigateProfileReview={() => navigate('/profile-review')}
+                    />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/build-resume"
+                element={
+                  <ProtectedRoute>
+                    <BuildResumeView
+                      isStarting={isStartingLinkedinImport}
+                      job={linkedinImportJob}
+                      error={linkedinImportError}
+                      onStart={startLinkedinImport}
+                      onRefresh={refreshLinkedinImportJob}
+                      onBackDashboard={() => navigate('/dashboard')}
+                      onOpenProfileReview={() => navigate('/profile-review')}
                     />
                   </ProtectedRoute>
                 }

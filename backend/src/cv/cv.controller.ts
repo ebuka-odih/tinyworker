@@ -1,7 +1,9 @@
 import {
   Body,
+  NotFoundException,
   Controller,
   Get,
+  Param,
   Post,
   Req,
   ServiceUnavailableException,
@@ -15,6 +17,7 @@ import { diskStorage } from 'multer'
 import type { Request } from 'express'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
 import { JwtAuthGuard } from '../auth/jwt.guard'
@@ -38,6 +41,7 @@ const LINKEDIN_PROXY_ENABLED = /^(1|true|yes)$/i.test(
 const LINKEDIN_PROXY_COUNTRY = String(process.env.TINYFISH_LINKEDIN_PROXY_COUNTRY || '')
   .trim()
   .toUpperCase()
+const LINKEDIN_IMPORT_JOB_TTL_MS = 1000 * 60 * 60
 
 const LinkedinImportSchema = z.object({
   linkedinUrl: z
@@ -99,6 +103,56 @@ function buildProxyConfig(enabled: boolean): { enabled: boolean; country_code?: 
   return {
     enabled: true,
     ...(LINKEDIN_PROXY_COUNTRY ? { country_code: LINKEDIN_PROXY_COUNTRY } : {}),
+  }
+}
+
+type LinkedinImportJobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+type LinkedinImportJobLog = {
+  at: string
+  message: string
+}
+type LinkedinImportJob = {
+  id: string
+  userId: string
+  linkedinUrl: string
+  status: LinkedinImportJobStatus
+  stage: string
+  logs: LinkedinImportJobLog[]
+  error: string | null
+  cvId: string | null
+  profileId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+const linkedinImportJobs = new Map<string, LinkedinImportJob>()
+
+function nowIso() {
+  return new Date().toISOString()
+}
+
+function pruneOldLinkedinJobs() {
+  const cutoff = Date.now() - LINKEDIN_IMPORT_JOB_TTL_MS
+  for (const [jobId, job] of linkedinImportJobs.entries()) {
+    const ts = Date.parse(job.updatedAt)
+    if (!Number.isFinite(ts) || ts < cutoff) {
+      linkedinImportJobs.delete(jobId)
+    }
+  }
+}
+
+function toPublicJob(job: LinkedinImportJob) {
+  return {
+    id: job.id,
+    linkedinUrl: job.linkedinUrl,
+    status: job.status,
+    stage: job.stage,
+    logs: job.logs,
+    error: job.error,
+    cvId: job.cvId,
+    profileId: job.profileId,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
   }
 }
 
@@ -201,6 +255,112 @@ export class CvController {
     }
 
     const linkedinUrl = parsed.linkedinUrl.trim()
+    pruneOldLinkedinJobs()
+    const activeJob = Array.from(linkedinImportJobs.values()).find(
+      (job) =>
+        job.userId === userId &&
+        job.linkedinUrl === linkedinUrl &&
+        (job.status === 'queued' || job.status === 'running'),
+    )
+    if (activeJob) {
+      return { ok: true, jobId: activeJob.id, job: toPublicJob(activeJob) }
+    }
+
+    const jobId = randomUUID()
+    const createdAt = nowIso()
+    const job: LinkedinImportJob = {
+      id: jobId,
+      userId,
+      linkedinUrl,
+      status: 'queued',
+      stage: 'queued',
+      logs: [{ at: createdAt, message: 'Queued LinkedIn resume build request' }],
+      error: null,
+      cvId: null,
+      profileId: null,
+      createdAt,
+      updatedAt: createdAt,
+    }
+    linkedinImportJobs.set(jobId, job)
+
+    void this.runLinkedinImportJob(jobId).catch((e: any) => {
+      const msg = e?.message || String(e)
+      this.failJob(jobId, msg)
+    })
+
+    return { ok: true, jobId, job: toPublicJob(job) }
+  }
+
+  @Get('import-linkedin/:jobId')
+  async getLinkedinImportJob(@Req() req: any, @Param('jobId') jobId: string) {
+    const userId = req.user.userId as string
+    const job = linkedinImportJobs.get(jobId)
+    if (!job || job.userId !== userId) {
+      throw new NotFoundException('LinkedIn import job not found')
+    }
+    return { ok: true, job: toPublicJob(job) }
+  }
+
+  private pushJobLog(jobId: string, message: string) {
+    const job = linkedinImportJobs.get(jobId)
+    if (!job) return
+    const at = nowIso()
+    job.logs.push({ at, message })
+    job.updatedAt = at
+  }
+
+  private setJobStage(jobId: string, stage: string, status: LinkedinImportJobStatus) {
+    const job = linkedinImportJobs.get(jobId)
+    if (!job) return
+    job.stage = stage
+    job.status = status
+    job.updatedAt = nowIso()
+  }
+
+  private completeJob(jobId: string, payload: { cvId: string; profileId?: string | null }) {
+    const job = linkedinImportJobs.get(jobId)
+    if (!job) return
+    job.status = 'succeeded'
+    job.stage = 'completed'
+    job.cvId = payload.cvId
+    job.profileId = payload.profileId ?? null
+    job.updatedAt = nowIso()
+    job.error = null
+    this.pushJobLog(jobId, 'Resume build completed')
+  }
+
+  private failJob(jobId: string, errorMessage: string) {
+    const job = linkedinImportJobs.get(jobId)
+    if (!job) return
+    job.status = 'failed'
+    job.stage = 'failed'
+    job.error = errorMessage
+    job.updatedAt = nowIso()
+    this.pushJobLog(jobId, `Failed: ${errorMessage}`)
+  }
+
+  private async runLinkedinImportJob(jobId: string) {
+    const job = linkedinImportJobs.get(jobId)
+    if (!job) return
+    const { userId, linkedinUrl } = job
+    this.setJobStage(jobId, 'starting', 'running')
+    this.pushJobLog(jobId, 'Starting TinyFish LinkedIn import')
+
+    try {
+      const result = await this.executeLinkedinImport(userId, linkedinUrl, (msg) =>
+        this.pushJobLog(jobId, msg),
+      )
+      this.completeJob(jobId, result)
+    } catch (e: any) {
+      this.failJob(jobId, e?.message || String(e))
+    }
+  }
+
+  private async executeLinkedinImport(
+    userId: string,
+    linkedinUrl: string,
+    log: (msg: string) => void,
+  ): Promise<{ cvId: string; profileId: string | null }> {
     const linkedinStoragePath = `linkedin:${linkedinUrl}`
 
     const existingCv = await this.prisma.cV.findFirst({
@@ -215,16 +375,12 @@ export class CvController {
       },
     })
     if (existingCv) {
+      log('Using cached LinkedIn import')
       const existingProfile = await this.prisma.candidateProfile.findFirst({
         where: { userId, cvId: existingCv.id },
         orderBy: { createdAt: 'desc' },
       })
-      return {
-        ok: true,
-        cv: existingCv,
-        profile: existingProfile || null,
-        extraction: { method: 'cached-linkedin', warning: null },
-      }
+      return { cvId: existingCv.id, profileId: existingProfile?.id ?? null }
     }
 
     const goal = `Open this LinkedIn profile URL and extract candidate profile details.
@@ -257,16 +413,14 @@ Rules:
 `
 
     let result: any = null
-    let attemptLabel = `${LINKEDIN_BROWSER_PROFILE}:${LINKEDIN_PROXY_ENABLED ? 'proxy' : 'direct'}`
     const attempts: Array<{ browser_profile: 'lite' | 'stealth'; proxy: boolean; label: string }> = [
       {
         browser_profile: LINKEDIN_BROWSER_PROFILE,
         proxy: LINKEDIN_PROXY_ENABLED,
-        label: attemptLabel,
+        label: `${LINKEDIN_BROWSER_PROFILE}:${LINKEDIN_PROXY_ENABLED ? 'proxy' : 'direct'}`,
       },
     ]
-    const needsFallback =
-      LINKEDIN_BROWSER_PROFILE !== 'stealth' || !LINKEDIN_PROXY_ENABLED
+    const needsFallback = LINKEDIN_BROWSER_PROFILE !== 'stealth' || !LINKEDIN_PROXY_ENABLED
     if (needsFallback) {
       attempts.push({
         browser_profile: 'stealth',
@@ -275,8 +429,10 @@ Rules:
       })
     }
 
+    let attemptLabel = attempts[0].label
     let lastError: any = null
     for (const attempt of attempts) {
+      log(`Running TinyFish attempt (${attempt.label})`)
       try {
         const evt = await runTinyfish({
           url: linkedinUrl,
@@ -304,6 +460,7 @@ Rules:
       })
     }
 
+    log(`TinyFish extraction completed (${attemptLabel})`)
     const extractedText = buildExtractedTextFromLinkedinResult(result)
     const unavailableReason = String(result?.unavailable_reason || '').trim()
     if (!extractedText && unavailableReason) {
@@ -333,6 +490,7 @@ Rules:
       }
     })()
 
+    log('Saving CV record')
     const cv = await this.prisma.cV.create({
       data: {
         userId,
@@ -346,13 +504,10 @@ Rules:
       },
       select: {
         id: true,
-        filename: true,
-        mimeType: true,
-        sizeBytes: true,
-        createdAt: true,
       },
     })
 
+    log('Creating candidate profile')
     const profile = await this.prisma.candidateProfile.create({
       data: {
         userId,
@@ -374,16 +529,9 @@ Rules:
         links: normalizedLinks,
         redFlags: profileSeed?.red_flags ?? null,
       },
+      select: { id: true },
     })
 
-    return {
-      ok: true,
-      cv,
-      profile,
-      extraction: {
-        method: `tinyfish-linkedin:${attemptLabel}`,
-        warning: unavailableReason || null,
-      },
-    }
+    return { cvId: cv.id, profileId: profile.id }
   }
 }

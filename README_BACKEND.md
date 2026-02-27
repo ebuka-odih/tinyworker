@@ -19,7 +19,8 @@ npm run start:dev
 - GET /api/auth/me
 - GET /api/cv
 - POST /api/cv/upload
-- POST /api/cv/import-linkedin
+- POST /api/cv/import-linkedin (starts async job)
+- GET /api/cv/import-linkedin/:jobId (poll async job)
 - POST /api/profile/extract/:cvId (PATH A: pdf/docx -> text locally -> TinyFish structures JSON)
 - PATCH /api/profile/:profileId
 - POST /api/tinyfish/run
