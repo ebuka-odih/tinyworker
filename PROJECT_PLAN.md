@@ -12,7 +12,7 @@
   - Keep TinyFish integration proxied through backend
 
 ## Dependency graph rules
-- Task IDs: `T1` ... `T7`
+- Task IDs: `T1` ... `T13`
 - Every task declares `depends_on`
 - Only run blocked tasks after dependencies are complete
 
@@ -132,6 +132,130 @@
 - validation:
   - `npm run build`
 - done: true
+
+### T8 — Phase 2A chat domain model + APIs
+- depends_on: [T2, T5, T7]
+- owner: backend
+- description:
+  - Add persistent chat session/message models and APIs.
+  - Keep all chat data scoped per authenticated user.
+  - Support typed assistant messages (`text`, `options`, `results`, `progress`) from API.
+- files:
+  - backend/prisma/schema.prisma
+  - backend/prisma/migrations/*
+  - backend/src/chat/*
+  - backend/src/app.module.ts
+- acceptance_criteria:
+  - User can create/list chat sessions
+  - User messages and assistant messages persist and can be reloaded
+  - API returns normalized message payload shape for frontend rendering
+- validation:
+  - `npm --prefix backend run build`
+  - curl smoke for `/api/chat/*`
+- done: false
+
+### T9 — Phase 2B chat orchestrator with real sources
+- depends_on: [T8]
+- owner: backend
+- description:
+  - Build server-side chat orchestration that uses persisted profile + intent context.
+  - For jobs flow, call TinyFish through backend and persist opportunities from results.
+  - Add graceful fallback when TinyFish is unavailable.
+  - Match Telegram flow parity for jobs and scholarships step sequencing (`job_level...review`, `sch_level...review`).
+- files:
+  - backend/src/chat/*
+  - backend/src/tinyfish/*
+  - backend/src/opportunities/*
+- acceptance_criteria:
+  - Chat replies are generated from backend logic, not hardcoded frontend branches
+  - Job-search turns can produce persisted opportunities linked to current user
+  - Failure mode returns user-safe assistant error message without crashing chat
+  - Flow engine supports manual text input on parity steps (jobs: title/focus/location/stack/salary; scholarships: country/field/year/eligibility)
+- validation:
+  - `npm --prefix backend run build`
+  - endpoint smoke for success and TinyFish-failure paths
+- done: false
+
+### T10 — Phase 2C frontend chat real-data integration
+- depends_on: [T8, T9]
+- owner: frontend
+- description:
+  - Replace local scripted flow in `ChatView` with API-backed session/messages.
+  - Load chat history on route open and append optimistic user messages.
+  - Render server-provided options/results/progress message types.
+  - Render step progress in UI as `Step X/Y` according to backend flow metadata.
+- files:
+  - frontend/src/components/app/views/ChatView.tsx
+  - frontend/src/App.tsx
+  - frontend/src/types.ts
+  - frontend/src/services/*
+- acceptance_criteria:
+  - Reloading `/chat` restores session history from backend
+  - Sending free text/options posts to backend and shows API reply
+  - No hardcoded job/scholarship branching remains in frontend
+  - Manual text entry works on parity-defined manual steps without breaking flow state
+- validation:
+  - `npm run build`
+  - manual smoke: open chat -> send message -> reload page -> history persists
+- done: false
+
+### T11 — Phase 2D chat action wiring to pipeline
+- depends_on: [T10]
+- owner: frontend,backend
+- description:
+  - Wire chat result actions to persisted pipeline actions.
+  - Add explicit actions from chat cards: save opportunity, create application, open details.
+  - Keep idempotency safeguards to prevent duplicate imports/actions.
+- files:
+  - backend/src/chat/*
+  - backend/src/opportunities/*
+  - backend/src/applications/*
+  - frontend/src/components/app/views/ChatView.tsx
+  - frontend/src/App.tsx
+- acceptance_criteria:
+  - “Save” from chat result is reflected in opportunities/applications views
+  - Duplicate clicks do not create duplicate records
+  - Chat-to-dashboard navigation shows consistent persisted state
+- validation:
+  - `npm --prefix backend run build`
+  - `npm run build`
+- done: false
+
+### T12 — Phase 2E observability + rate-limit safeguards
+- depends_on: [T9]
+- owner: backend
+- description:
+  - Add structured chat logs for request/response lifecycle (without secrets/PII leakage).
+  - Add per-user throttle on chat search triggers to control TinyFish spend.
+  - Capture failure counters to simplify operational debugging.
+- files:
+  - backend/src/chat/*
+  - backend/src/tinyfish/*
+- acceptance_criteria:
+  - Chat requests include traceable request IDs in logs
+  - Rate-limit response is explicit and user-friendly
+  - Error telemetry captures upstream failure reason class
+- validation:
+  - `npm --prefix backend run build`
+  - manual smoke for throttle behavior
+- done: false
+
+### T13 — Phase 2 validation gates
+- depends_on: [T8, T9, T10, T11, T12]
+- owner: qa
+- description:
+  - Run integrated build and smoke checks for the new chat flow.
+  - Verify mobile behavior for long threads and bottom input stability.
+- files:
+  - docs/plans/phase-roadmap.md
+- acceptance_criteria:
+  - Build and smoke commands executed or blockers recorded
+  - Chat flow tested for message persistence and pipeline actions
+- validation:
+  - `npm run build`
+  - API smoke for `/api/chat/*`
+  - mobile smoke checklist for `/chat`
+- done: false
 
 ### T6 — Validation gates
 - depends_on: [T1, T2, T3, T5, T7]

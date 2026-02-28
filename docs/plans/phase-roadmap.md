@@ -2,9 +2,60 @@
 
 ## Current status
 - Phase 1 (Profile intelligence): Implemented with backend extraction and profile review UI.
-- Phase 2 (Guided questions): MVP implemented with `/api/intent` persistence + frontend wizard.
+- Phase 2 (Agent chat with real data): Planned (backend chat APIs + orchestration + frontend integration not yet implemented).
+- Phase 2 prerequisite (Guided questions): MVP implemented with `/api/intent` persistence + frontend wizard.
 - Phase 3 (Job search): MVP implemented through TinyFish LinkedIn flow + persisted opportunities.
 - Phase 4 (Tailored documents): Partial (document persistence implemented; generation quality still placeholder).
+
+## Phase 2 execution plan (Agent chat with real data)
+- P2.1 Backend chat persistence
+  - Add chat session/message schema + `/api/chat/*` endpoints.
+- P2.2 Backend chat orchestration
+  - Move branching logic from frontend to backend service.
+  - Use profile + intent context and persist opportunity results.
+- P2.3 Frontend chat API migration
+  - Replace scripted local flow in `ChatView` with API-backed message history.
+- P2.4 Chat action wiring
+  - Save opportunity / create application actions directly from chat results.
+- P2.5 Reliability + cost controls
+  - Add throttling, structured logging, and graceful failure handling.
+- P2.6 Validation
+  - Build + endpoint smoke + mobile chat layout verification.
+
+## Phase 2 flow parity spec (source: TinyFish Telegram handlers)
+
+### Jobs flow (11 steps)
+| Step | Key | Prompt intent |
+|---|---|---|
+| 1 | `job_level` | Role level |
+| 2 | `job_title` | Title keywords (pick or manual text) |
+| 3 | `job_focus` | Industry/field (pick/any/manual) |
+| 4 | `job_location` | Country (pick or manual text) |
+| 5 | `job_mode` | Remote/hybrid/onsite |
+| 6 | `job_source` | Preferred source |
+| 7 | `job_stack` | Skills/tools (pick/skip/manual) |
+| 8 | `job_visa` | Sponsorship yes/no/skip |
+| 9 | `job_salary` | Salary band (pick/skip/manual) |
+| 10 | `job_company` | Startup/enterprise/any |
+| 11 | `review` | Actions: Run search / Edit / Save & monitor |
+
+### Scholarships flow (10 steps)
+| Step | Key | Prompt intent |
+|---|---|---|
+| 1 | `sch_level` | Study level (Masters/PhD/etc.) |
+| 2 | `sch_country` or `sch_country_manual` | Destination country |
+| 3 | `sch_field` | Field/program keywords (pick or manual) |
+| 4 | `sch_funding` | Full/partial/any |
+| 5 | `sch_tuition` | Tuition preference |
+| 6 | `sch_intake` | Intake season |
+| 7 | `sch_year` | Intake year (pick or manual) |
+| 8 | `sch_eligibility_text` | Eligibility notes/quick option |
+| 9 | `sch_deadline` | Deadline urgency |
+| 10 | `review` | Actions: Run search / Edit / Save & monitor |
+
+### Manual text-accepted steps
+- Scholarships: `sch_country`, `sch_country_manual`, `sch_field`, `sch_year`, `sch_eligibility_text`
+- Jobs: `job_title`, `job_focus`, `job_location`, `job_stack`, `job_salary`
 
 ## Validation checklist
 - Build
