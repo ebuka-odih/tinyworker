@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { ArrowRight, Search, Settings, Sparkles } from 'lucide-react'
 import { motion } from 'motion/react'
 
-import { ChatMessage, Opportunity } from '../../../types'
+import { Opportunity } from '../../../types'
 import { tinyfishService } from '../../../services/tinyfishService'
 import { Badge, Button, Card } from '../AppPrimitives'
 
@@ -20,6 +20,20 @@ type FlowState = {
   domain: FlowDomain
   stepIndex: number
   criteria: Record<string, string>
+}
+
+type OptionContext =
+  | { type: 'root' }
+  | { type: 'flow'; flow: FlowState }
+
+type LocalChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  type?: 'text' | 'options' | 'results' | 'progress'
+  options?: string[]
+  results?: Opportunity[]
+  optionContext?: OptionContext
 }
 
 const ROOT_OPTIONS = ['Scholarships', 'Jobs', 'Visa Requirements', 'Upload CV']
@@ -69,7 +83,15 @@ const JOB_STEPS: FlowStep[] = [
   {
     key: 'job_source',
     prompt: 'Preferred source(s)?',
-    options: ['LinkedIn Jobs', 'Indeed', 'Jobberman', 'MyJobMag', 'Djinni', 'Company Career Pages', 'All + Other Trusted Sites'],
+    options: [
+      'LinkedIn Jobs',
+      'Indeed',
+      'Jobberman',
+      'MyJobMag',
+      'Djinni',
+      'Company Career Pages',
+      'All + Other Trusted Sites',
+    ],
   },
   {
     key: 'job_stack',
@@ -86,7 +108,14 @@ const JOB_STEPS: FlowStep[] = [
   {
     key: 'job_salary',
     prompt: 'Salary band?',
-    options: ['Under N300k/month', 'N300k - N700k/month', 'N700k - N1.5m/month', 'Above N1.5m/month', 'Skip', 'Type manually'],
+    options: [
+      'Under N300k/month',
+      'N300k - N700k/month',
+      'N700k - N1.5m/month',
+      'Above N1.5m/month',
+      'Skip',
+      'Type manually',
+    ],
     manualTextAccepted: true,
     manualPrompt: 'Type your salary preference.',
   },
@@ -180,6 +209,14 @@ function normalizeText(value: string): string {
   return value.trim().toLowerCase()
 }
 
+function cloneFlowState(flow: FlowState): FlowState {
+  return {
+    domain: flow.domain,
+    stepIndex: flow.stepIndex,
+    criteria: { ...flow.criteria },
+  }
+}
+
 function withStepLabel(domain: FlowDomain, stepIndex: number, prompt: string): string {
   const total = stepsForDomain(domain).length
   return `Step ${stepIndex + 1}/${total}\n${prompt}`
@@ -226,22 +263,46 @@ export function ChatView({
   onImportOpportunities: (items: Opportunity[]) => Promise<void>
   onViewDetails: () => void
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
+  const [messages, setMessages] = useState<LocalChatMessage[]>([
     {
+      id: 'm-0',
       role: 'assistant',
       content:
         "Hi! I'm your Opportunity Agent. I can help you find scholarships, jobs, or visa requirements. What's our goal today?",
       type: 'options',
       options: ROOT_OPTIONS,
+      optionContext: { type: 'root' },
     },
   ])
   const [isTyping, setIsTyping] = useState(false)
   const [inputValue, setInputValue] = useState('')
   const [flow, setFlow] = useState<FlowState | null>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
+  const nextMessageIdRef = React.useRef(1)
 
-  const appendAssistantMessage = (message: Omit<ChatMessage, 'role'>) => {
-    setMessages((prev) => [...prev, { role: 'assistant', ...message }])
+  const nextMessageId = () => {
+    const id = `m-${nextMessageIdRef.current}`
+    nextMessageIdRef.current += 1
+    return id
+  }
+
+  const appendAssistantMessage = (
+    message: Omit<LocalChatMessage, 'id' | 'role' | 'optionContext'>,
+    optionContext?: OptionContext,
+  ) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextMessageId(),
+        role: 'assistant',
+        ...message,
+        optionContext,
+      },
+    ])
+  }
+
+  const appendUserMessage = (content: string) => {
+    setMessages((prev) => [...prev, { id: nextMessageId(), role: 'user', content }])
   }
 
   const scrollToBottom = () => {
@@ -255,26 +316,33 @@ export function ChatView({
   }, [messages, isTyping])
 
   const askCurrentStep = (nextFlow: FlowState) => {
+    const flowSnapshot = cloneFlowState(nextFlow)
     const step = stepsForDomain(nextFlow.domain)[nextFlow.stepIndex]
     if (step.key === 'review') {
-      appendAssistantMessage({
-        content: buildReviewSummary(nextFlow),
-        type: 'options',
-        options: step.options,
-      })
+      appendAssistantMessage(
+        {
+          content: buildReviewSummary(nextFlow),
+          type: 'options',
+          options: step.options,
+        },
+        { type: 'flow', flow: flowSnapshot },
+      )
       return
     }
 
-    appendAssistantMessage({
-      content: withStepLabel(nextFlow.domain, nextFlow.stepIndex, step.prompt),
-      type: 'options',
-      options: step.options,
-    })
+    appendAssistantMessage(
+      {
+        content: withStepLabel(nextFlow.domain, nextFlow.stepIndex, step.prompt),
+        type: 'options',
+        options: step.options,
+      },
+      { type: 'flow', flow: flowSnapshot },
+    )
   }
 
   const restartFlow = (domain: FlowDomain) => {
     const nextFlow: FlowState = { domain, stepIndex: 0, criteria: {} }
-    setFlow(nextFlow)
+    setFlow(cloneFlowState(nextFlow))
     askCurrentStep(nextFlow)
   }
 
@@ -300,20 +368,26 @@ export function ChatView({
         type: 'results',
         results,
       })
-      appendAssistantMessage({
-        content: 'You can start a new search or open dashboard details.',
-        type: 'options',
-        options: ['New Jobs Search', 'Go to Dashboard'],
-      })
+      appendAssistantMessage(
+        {
+          content: 'You can start a new search or open dashboard details.',
+          type: 'options',
+          options: ['New Jobs Search', 'Go to Dashboard'],
+        },
+        { type: 'root' },
+      )
     } catch (e: any) {
       appendAssistantMessage({
         content: e?.message || 'Job search failed. Please try again.',
       })
-      appendAssistantMessage({
-        content: 'Choose next action.',
-        type: 'options',
-        options: ['Retry Jobs Search', 'Go to Dashboard'],
-      })
+      appendAssistantMessage(
+        {
+          content: 'Choose next action.',
+          type: 'options',
+          options: ['Retry Jobs Search', 'Go to Dashboard'],
+        },
+        { type: 'root' },
+      )
     } finally {
       setFlow(null)
       setIsTyping(false)
@@ -325,17 +399,24 @@ export function ChatView({
       content:
         'Scholarship live search integration is next. Your scholarship criteria has been captured and is ready for backend execution.',
     })
-    appendAssistantMessage({
-      content: 'Choose next action.',
-      type: 'options',
-      options: ['New Scholarships Search', 'Go to Dashboard'],
-    })
+    appendAssistantMessage(
+      {
+        content: 'Choose next action.',
+        type: 'options',
+        options: ['New Scholarships Search', 'Go to Dashboard'],
+      },
+      { type: 'root' },
+    )
     setFlow(null)
   }
 
   const handleRootInput = async (value: string) => {
     const normalized = normalizeText(value)
-    if (normalized === normalizeText('Jobs') || normalized === normalizeText('New Jobs Search') || normalized === normalizeText('Retry Jobs Search')) {
+    if (
+      normalized === normalizeText('Jobs') ||
+      normalized === normalizeText('New Jobs Search') ||
+      normalized === normalizeText('Retry Jobs Search')
+    ) {
       restartFlow('jobs')
       return
     }
@@ -351,41 +432,51 @@ export function ChatView({
     }
 
     if (normalized === normalizeText('Visa Requirements')) {
-      appendAssistantMessage({
-        content: 'Visa flow in web chat is not yet wired. For now, use Jobs or Scholarships flow.',
-        type: 'options',
-        options: ROOT_OPTIONS,
-      })
+      appendAssistantMessage(
+        {
+          content: 'Visa flow in web chat is not yet wired. For now, use Jobs or Scholarships flow.',
+          type: 'options',
+          options: ROOT_OPTIONS,
+        },
+        { type: 'root' },
+      )
       return
     }
 
     if (normalized === normalizeText('Upload CV')) {
-      appendAssistantMessage({
-        content: 'Use Dashboard -> Upload CV, then return here for guided matching.',
-        type: 'options',
-        options: ['Go to Dashboard', 'Jobs', 'Scholarships'],
-      })
+      appendAssistantMessage(
+        {
+          content: 'Use Dashboard -> Upload CV, then return here for guided matching.',
+          type: 'options',
+          options: ['Go to Dashboard', 'Jobs', 'Scholarships'],
+        },
+        { type: 'root' },
+      )
       return
     }
 
-    appendAssistantMessage({
-      content: 'Pick a flow to continue.',
-      type: 'options',
-      options: ROOT_OPTIONS,
-    })
+    appendAssistantMessage(
+      {
+        content: 'Pick a flow to continue.',
+        type: 'options',
+        options: ROOT_OPTIONS,
+      },
+      { type: 'root' },
+    )
   }
 
-  const handleFlowInput = async (value: string) => {
-    if (!flow) return
+  const handleFlowInput = async (value: string, sourceFlow: FlowState) => {
+    const activeFlow = cloneFlowState(sourceFlow)
+    setFlow(activeFlow)
 
-    const steps = stepsForDomain(flow.domain)
-    const step = steps[flow.stepIndex]
+    const steps = stepsForDomain(activeFlow.domain)
+    const step = steps[activeFlow.stepIndex]
     const normalized = normalizeText(value)
 
     if (step.key === 'review') {
       if (normalized === normalizeText('Run search')) {
-        if (flow.domain === 'jobs') {
-          await runJobSearch(flow.criteria)
+        if (activeFlow.domain === 'jobs') {
+          await runJobSearch(activeFlow.criteria)
         } else {
           await runScholarshipSearch()
         }
@@ -393,24 +484,30 @@ export function ChatView({
       }
 
       if (normalized === normalizeText('Edit')) {
-        restartFlow(flow.domain)
+        restartFlow(activeFlow.domain)
         return
       }
 
       if (normalized === normalizeText('Save & monitor')) {
-        appendAssistantMessage({
-          content: 'Save & monitor is captured. Monitor automation wiring will be enabled in the next phase.',
-          type: 'options',
-          options: ['Run search', 'Edit'],
-        })
+        appendAssistantMessage(
+          {
+            content: 'Save & monitor is captured. Monitor automation wiring will be enabled in the next phase.',
+            type: 'options',
+            options: ['Run search', 'Edit'],
+          },
+          { type: 'flow', flow: activeFlow },
+        )
         return
       }
 
-      appendAssistantMessage({
-        content: 'Choose one of the review actions.',
-        type: 'options',
-        options: REVIEW_OPTIONS,
-      })
+      appendAssistantMessage(
+        {
+          content: 'Choose one of the review actions.',
+          type: 'options',
+          options: REVIEW_OPTIONS,
+        },
+        { type: 'flow', flow: activeFlow },
+      )
       return
     }
 
@@ -423,56 +520,73 @@ export function ChatView({
     }
 
     if (!matched && !step.manualTextAccepted) {
-      appendAssistantMessage({
-        content: 'Select one of the options to continue.',
-        type: 'options',
-        options: step.options,
-      })
+      appendAssistantMessage(
+        {
+          content: 'Select one of the options to continue.',
+          type: 'options',
+          options: step.options,
+        },
+        { type: 'flow', flow: activeFlow },
+      )
       return
     }
 
     const answer = matched || value.trim()
     if (!answer) return
 
-    const nextCriteria = { ...flow.criteria, [step.key]: answer }
-    const nextIndex = flow.stepIndex + 1
+    const nextCriteria = { ...activeFlow.criteria, [step.key]: answer }
+    const nextIndex = activeFlow.stepIndex + 1
 
     if (nextIndex >= steps.length) {
       setFlow(null)
-      appendAssistantMessage({
-        content: 'Flow completed.',
-        type: 'options',
-        options: ROOT_OPTIONS,
-      })
+      appendAssistantMessage(
+        {
+          content: 'Flow completed.',
+          type: 'options',
+          options: ROOT_OPTIONS,
+        },
+        { type: 'root' },
+      )
       return
     }
 
     const nextFlow: FlowState = {
-      domain: flow.domain,
+      domain: activeFlow.domain,
       stepIndex: nextIndex,
       criteria: nextCriteria,
     }
 
-    setFlow(nextFlow)
+    setFlow(cloneFlowState(nextFlow))
     askCurrentStep(nextFlow)
   }
 
-  const handleUserInput = async (value: string) => {
+  const handleUserInput = async (value: string, context?: OptionContext) => {
     const trimmed = value.trim()
     if (!trimmed || isTyping) return
 
-    setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+    appendUserMessage(trimmed)
+
+    if (context?.type === 'flow') {
+      await handleFlowInput(trimmed, context.flow)
+      return
+    }
+
+    if (context?.type === 'root') {
+      await handleRootInput(trimmed)
+      return
+    }
 
     if (!flow) {
       await handleRootInput(trimmed)
       return
     }
 
-    await handleFlowInput(trimmed)
+    await handleFlowInput(trimmed, flow)
   }
 
-  const handleOption = async (option: string) => {
-    await handleUserInput(option)
+  const handleOption = async (option: string, sourceMessageId: string) => {
+    const source = messages.find((msg) => msg.id === sourceMessageId)
+    await handleUserInput(option, source?.optionContext)
   }
 
   const handleSend = async () => {
@@ -509,9 +623,9 @@ export function ChatView({
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-6 pb-[180px] md:pb-44 scroll-smooth">
-        {messages.map((msg, i) => (
+        {messages.map((msg) => (
           <motion.div
-            key={i}
+            key={msg.id}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -531,10 +645,10 @@ export function ChatView({
                 <div className="flex flex-wrap gap-2">
                   {msg.options?.map((opt) => (
                     <Button
-                      key={opt}
+                      key={`${msg.id}-${opt}`}
                       variant="outline"
                       className="bg-white border-slate-200 hover:border-slate-900 hover:text-slate-900 shadow-sm py-2.5 px-5"
-                      onClick={() => handleOption(opt)}
+                      onClick={() => void handleOption(opt, msg.id)}
                     >
                       {opt}
                     </Button>
@@ -601,7 +715,12 @@ export function ChatView({
             placeholder="Ask me anything..."
             className="flex-1 bg-transparent border-none rounded-xl px-3 md:px-4 py-2 focus:outline-none text-sm text-slate-700"
           />
-          <Button variant="primary" className="px-4 rounded-xl py-2" onClick={() => void handleSend()} disabled={!inputValue.trim() || isTyping}>
+          <Button
+            variant="primary"
+            className="px-4 rounded-xl py-2"
+            onClick={() => void handleSend()}
+            disabled={!inputValue.trim() || isTyping}
+          >
             <ArrowRight size={20} />
           </Button>
         </div>
