@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, History, MessageSquarePlus, Search, Settings, Sparkles, Upload } from 'lucide-react'
+import { ArrowRight, ExternalLink, History, LoaderCircle, MessageSquarePlus, Search, Settings, Sparkles, Upload } from 'lucide-react'
 import { motion } from 'motion/react'
 
 import {
@@ -273,6 +273,14 @@ function formatUpdatedAt(iso: string): string {
   return d.toLocaleString()
 }
 
+function isSessionEmptyDraft(session: ChatSession): boolean {
+  const hasUserMessage = session.messages.some(
+    (msg) => msg.role === 'user' && msg.content.trim().length > 0,
+  )
+  const isDefaultTitle = !session.title.trim() || session.title === 'New Search'
+  return !hasUserMessage && !session.flow && isDefaultTitle
+}
+
 async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -488,6 +496,19 @@ export function ChatView({
   }
 
   const startNewSession = () => {
+    const reusable = [...sessions]
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .find(isSessionEmptyDraft)
+
+    if (reusable) {
+      setActiveSessionId(reusable.id)
+      setWorkspaceMode('chat')
+      setInputValue('')
+      setIsMobileHistoryOpen(false)
+      setAwaitingLinkedinUrlSessionId(null)
+      return
+    }
+
     const next = createSession()
     setSessions((prev) => [next, ...prev])
     setActiveSessionId(next.id)
@@ -505,48 +526,74 @@ export function ChatView({
 
   const runJobSearch = async (sessionId: string, criteria: Record<string, string>) => {
     setSessionBusy(sessionId, true)
+    const progressMessageId = makeId('msg')
+    const setProgress = (content: string, done = false) => {
+      updateSession(sessionId, (session) => {
+        const nextMessage: LocalChatMessage = {
+          id: progressMessageId,
+          role: 'assistant',
+          type: done ? 'text' : 'progress',
+          content,
+        }
+        const idx = session.messages.findIndex((msg) => msg.id === progressMessageId)
+        if (idx === -1) {
+          return { ...session, messages: [...session.messages, nextMessage] }
+        }
+        const updatedMessages = [...session.messages]
+        updatedMessages[idx] = nextMessage
+        return { ...session, messages: updatedMessages }
+      })
+    }
 
     try {
       const title = criteria.job_title && normalizeText(criteria.job_title) !== 'skip' ? criteria.job_title : 'Software Engineer'
       const focus = criteria.job_focus && normalizeText(criteria.job_focus) !== 'any' ? criteria.job_focus : ''
       const location = criteria.job_location && normalizeText(criteria.job_location) !== 'global' ? criteria.job_location : 'Remote'
       const visaHint = normalizeText(criteria.job_visa || '') === 'yes' ? 'visa sponsorship' : ''
-      const query = [title, focus, location, visaHint].filter(Boolean).join(' ').trim()
+      const mode = criteria.job_mode && normalizeText(criteria.job_mode) !== 'any' ? criteria.job_mode : ''
+      const stack = criteria.job_stack && normalizeText(criteria.job_stack) !== 'skip' ? criteria.job_stack : ''
+      const salary = criteria.job_salary && normalizeText(criteria.job_salary) !== 'skip' ? criteria.job_salary : ''
+      const query = [title, focus, location, mode, stack, visaHint, salary].filter(Boolean).join(' ').trim()
 
-      appendAssistantMessage(sessionId, {
-        type: 'progress',
-        content: 'Commentary: validating your selected filters and cleaning query terms.',
-      })
+      setProgress('Commentary: validating your selected filters and cleaning query terms.')
       await wait(400)
 
-      appendAssistantMessage(sessionId, {
-        type: 'progress',
-        content: `Commentary: built search query -> "${query}"`,
-      })
+      setProgress(`Commentary: built search query -> "${query}"`)
       await wait(420)
 
-      appendAssistantMessage(sessionId, {
-        type: 'progress',
-        content: 'Commentary: calling TinyFish to scan LinkedIn public job listings.',
-      })
+      setProgress('Commentary: calling TinyFish to scan LinkedIn public job listings.')
 
-      const results = await tinyfishService.searchJobsLinkedIn(query)
+      const results = await tinyfishService.searchJobsLinkedIn(query, criteria)
 
-      appendAssistantMessage(sessionId, {
-        type: 'progress',
-        content: `Commentary: fetched ${results.length} listing(s); ranking and preparing persistence.`,
-      })
+      setProgress(`Commentary: fetched ${results.length} listing(s); ranking and preparing persistence.`)
       await wait(280)
 
       await onImportOpportunities(results)
 
+      setProgress(`Commentary: saved ${results.length} listing(s) into your opportunities pipeline.`)
+      await wait(220)
+      setProgress('Commentary: search completed. Delivering ranked results.', true)
+
       appendAssistantMessage(sessionId, {
-        type: 'progress',
-        content: `Commentary: saved ${results.length} listing(s) into your opportunities pipeline.`,
+        content: [
+          'Search context used:',
+          `- Role level: ${criteria.job_level || 'Any'}`,
+          `- Title keywords: ${criteria.job_title || 'Any'}`,
+          `- Industry/field: ${criteria.job_focus || 'Any'}`,
+          `- Location: ${criteria.job_location || 'Any'}`,
+          `- Work mode: ${criteria.job_mode || 'Any'}`,
+          `- Source: ${criteria.job_source || 'Any'}`,
+          `- Skills/tools: ${criteria.job_stack || 'Any'}`,
+          `- Visa sponsorship: ${criteria.job_visa || 'Skip'}`,
+          `- Salary: ${criteria.job_salary || 'Skip'}`,
+          `- Company type: ${criteria.job_company || 'Any'}`,
+        ].join('\n'),
       })
 
       appendAssistantMessage(sessionId, {
-        content: 'Search complete. Here are roles I found:',
+        content: results.length
+          ? 'Search complete. Here are roles I found:'
+          : 'Search completed, but no role cards were returned from this run. Try another query or broaden filters.',
         type: 'results',
         results,
       })
@@ -561,6 +608,7 @@ export function ChatView({
         { type: 'root' },
       )
     } catch (e: any) {
+      setProgress('Commentary: search failed. Returning error details.', true)
       appendAssistantMessage(sessionId, {
         content: e?.message || 'Job search failed. Please try again.',
       })
@@ -1011,15 +1059,22 @@ export function ChatView({
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div className="max-w-[85%] space-y-3">
-                    <div
-                      className={`p-4 rounded-2xl shadow-sm leading-relaxed text-sm whitespace-pre-line ${
-                        msg.role === 'user'
-                          ? 'bg-slate-900 text-white rounded-br-none font-medium'
-                          : 'bg-white text-slate-800 rounded-bl-none border border-slate-100'
-                      }`}
-                    >
-                      {msg.content}
-                    </div>
+                    {msg.type === 'progress' ? (
+                      <div className="flex items-center gap-3 p-3.5 bg-slate-100/60 rounded-xl border border-slate-200/60 text-xs text-slate-700 font-medium">
+                        <LoaderCircle size={16} className="animate-spin text-slate-700 shrink-0" />
+                        <span className="leading-relaxed">{msg.content}</span>
+                      </div>
+                    ) : (
+                      <div
+                        className={`p-4 rounded-2xl shadow-sm leading-relaxed text-sm whitespace-pre-line ${
+                          msg.role === 'user'
+                            ? 'bg-slate-900 text-white rounded-br-none font-medium'
+                            : 'bg-white text-slate-800 rounded-bl-none border border-slate-100'
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                    )}
 
                     {msg.type === 'options' && (
                       <div className="flex flex-wrap gap-2">
@@ -1038,29 +1093,68 @@ export function ChatView({
 
                     {msg.type === 'results' && (
                       <div className="grid gap-3 sm:grid-cols-2">
-                        {msg.results?.map((res) => (
-                          <Card key={res.id} className="p-4 border-slate-200 hover:border-slate-400 transition-all group">
-                            <div className="flex justify-between items-start mb-2">
-                              <Badge color="slate">{res.type.toUpperCase()}</Badge>
-                              {res.matchScore && <span className="text-[10px] font-bold text-slate-900">{res.matchScore}% Match</span>}
+                        {msg.results?.length ? (
+                          msg.results.map((res) => (
+                            <Card key={res.id} className="p-4 border-slate-200 hover:border-slate-400 transition-all group">
+                              <div className="flex justify-between items-start mb-2">
+                                <Badge color="slate">{res.type.toUpperCase()}</Badge>
+                                {res.matchScore && <span className="text-[10px] font-bold text-slate-900">{res.matchScore}% Match</span>}
+                              </div>
+                              <div className="font-bold text-slate-900 group-hover:text-slate-600 transition-colors">{res.title || 'Untitled role'}</div>
+                              <div className="text-xs text-slate-500 mb-2">{res.organization || 'Unknown org'} • {res.location || 'Unknown location'}</div>
+                              <div className="flex flex-wrap gap-1.5 mb-2">
+                                {res.workMode && <Badge color="blue">{res.workMode}</Badge>}
+                                {res.employmentType && <Badge color="green">{res.employmentType}</Badge>}
+                                {res.seniority && <Badge color="amber">{res.seniority}</Badge>}
+                                {res.salary && res.salary !== 'Not stated' && <Badge color="rose">{res.salary}</Badge>}
+                              </div>
+                              {res.matchReason ? (
+                                <div className="text-[11px] text-slate-700 mb-2 leading-relaxed font-medium">Why this matches: {res.matchReason}</div>
+                              ) : null}
+                              <div className="text-[11px] text-slate-600 line-clamp-4 mb-2 leading-relaxed">{res.description || 'No description provided.'}</div>
+                              {res.requirements?.length ? (
+                                <div className="mb-3">
+                                  <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Top requirements</div>
+                                  <ul className="list-disc pl-4 space-y-0.5">
+                                    {res.requirements.slice(0, 3).map((req, idx) => (
+                                      <li key={`${res.id}-req-${idx}`} className="text-[11px] text-slate-700 leading-relaxed">
+                                        {req}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  className="flex-1 text-[10px] py-1"
+                                  onClick={() => void onCreateApplication(res.id, 'saved')}
+                                >
+                                  Save To Applications
+                                </Button>
+                                {res.link ? (
+                                  <a
+                                    href={res.link}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1 text-[10px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
+                                  >
+                                    View Job <ExternalLink size={11} />
+                                  </a>
+                                ) : null}
+                              </div>
+                            </Card>
+                          ))
+                        ) : (
+                          <Card className="p-4 border-slate-200 bg-slate-50">
+                            <div className="text-sm text-slate-600">
+                              No cards to display for this run. Try a broader location/title query.
                             </div>
-                            <div className="font-bold text-slate-900 group-hover:text-slate-600 transition-colors">{res.title}</div>
-                            <div className="text-xs text-slate-500 mb-2">{res.organization} • {res.location}</div>
-                            <div className="text-[11px] text-slate-600 line-clamp-2 mb-3 leading-relaxed">{res.description}</div>
-                            <Button variant="outline" className="w-full text-[10px] py-1" onClick={() => void onCreateApplication(res.id, 'saved')}>
-                              Save To Applications
-                            </Button>
                           </Card>
-                        ))}
+                        )}
                       </div>
                     )}
 
-                    {msg.type === 'progress' && (
-                      <div className="flex items-center gap-3 p-3 bg-slate-100/50 rounded-xl border border-slate-200/50 text-xs text-slate-700 font-medium">
-                        <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                        {msg.content}
-                      </div>
-                    )}
                   </div>
                 </motion.div>
               ))}

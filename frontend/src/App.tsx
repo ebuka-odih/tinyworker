@@ -361,6 +361,22 @@ export default function App() {
     link: String(o.link || ''),
     deadline: o.deadline ? String(o.deadline) : undefined,
     matchScore: typeof o.matchScore === 'number' ? o.matchScore : undefined,
+    salary: o.salary ? String(o.salary) : undefined,
+    seniority: o.seniority ? String(o.seniority) : undefined,
+    employmentType: o.employmentType ? String(o.employmentType) : undefined,
+    workMode: o.workMode ? String(o.workMode) : undefined,
+    postedDate: o.postedDate ? String(o.postedDate) : undefined,
+    matchReason: o.matchReason ? String(o.matchReason) : undefined,
+    responsibilities: Array.isArray(o.responsibilities) ? o.responsibilities.map(String) : undefined,
+    benefits: Array.isArray(o.benefits) ? o.benefits.map(String) : undefined,
+    applicationSteps: Array.isArray(o.applicationSteps) ? o.applicationSteps.map(String) : undefined,
+    faq: Array.isArray(o.faq) ? o.faq.map(String) : undefined,
+    importantNotes: o.importantNotes ? String(o.importantNotes) : undefined,
+    confidence:
+      o.confidence === 'high' || o.confidence === 'medium' || o.confidence === 'low'
+        ? (o.confidence as Opportunity['confidence'])
+        : undefined,
+    sourceUrl: o.sourceUrl ? String(o.sourceUrl) : undefined,
   })
 
   const loadOpportunities = async () => {

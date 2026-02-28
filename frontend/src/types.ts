@@ -118,6 +118,19 @@ export interface Opportunity {
   deadline?: string
   matchScore?: number
   visaStatus?: string
+  salary?: string
+  seniority?: string
+  employmentType?: string
+  workMode?: string
+  postedDate?: string
+  matchReason?: string
+  responsibilities?: string[]
+  benefits?: string[]
+  applicationSteps?: string[]
+  faq?: string[]
+  importantNotes?: string
+  confidence?: 'high' | 'medium' | 'low'
+  sourceUrl?: string
 }
 
 export interface Application {
