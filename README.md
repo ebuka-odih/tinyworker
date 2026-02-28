@@ -67,6 +67,8 @@ npm run start:dev
 - `GET /api/cv/import-linkedin/:jobId` (poll async job)
 - `POST /api/profile/extract/:cvId`
 - `PATCH /api/profile/:profileId`
+- `GET /api/intent`
+- `PATCH /api/intent`
 - `POST /api/tinyfish/run`
 - `GET /api/opportunities`
 - `POST /api/opportunities/import`

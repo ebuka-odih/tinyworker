@@ -2,7 +2,7 @@
 
 ## Current status
 - Phase 1 (Profile intelligence): Implemented with backend extraction and profile review UI.
-- Phase 2 (Guided questions): Not implemented yet.
+- Phase 2 (Guided questions): MVP implemented with `/api/intent` persistence + frontend wizard.
 - Phase 3 (Job search): MVP implemented through TinyFish LinkedIn flow + persisted opportunities.
 - Phase 4 (Tailored documents): Partial (document persistence implemented; generation quality still placeholder).
 
@@ -36,3 +36,11 @@
   - Ready-to-run smoke endpoints are listed above and covered by implemented controllers.
 - Mobile smoke
   - Manual checklist prepared; interactive browser/device verification not executed in this terminal-only pass.
+
+## Validation run (2026-02-28)
+- Full build
+  - `npm run build` passed after adding CandidateIntent schema, intent API, and guided questions wizard route.
+- Endpoint smoke
+  - Not executed in this run because no validated local Postgres runtime session was configured for API calls.
+- Mobile smoke
+  - Not executed in this terminal-only pass.

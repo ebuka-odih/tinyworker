@@ -12,7 +12,7 @@
   - Keep TinyFish integration proxied through backend
 
 ## Dependency graph rules
-- Task IDs: `T1` ... `T6`
+- Task IDs: `T1` ... `T7`
 - Every task declares `depends_on`
 - Only run blocked tasks after dependencies are complete
 
@@ -110,8 +110,31 @@
   - `npm run build`
 - done: true
 
+### T7 — Phase 2 guided intent flow
+- depends_on: [T2]
+- owner: frontend,backend
+- description:
+  - Add CandidateIntent persistence in backend with authenticated API endpoints.
+  - Add guided questions wizard in frontend with step state and draft/final saves.
+- files:
+  - backend/prisma/schema.prisma
+  - backend/prisma/migrations/*
+  - backend/src/intent/*
+  - backend/src/app.module.ts
+  - frontend/src/components/app/views/GuidedQuestionsView.tsx
+  - frontend/src/components/app/views/DashboardView.tsx
+  - frontend/src/App.tsx
+  - frontend/src/types.ts
+- acceptance_criteria:
+  - User can open guided questions flow from dashboard
+  - Intent responses persist via `/api/intent`
+  - Wizard supports draft and ready states
+- validation:
+  - `npm run build`
+- done: true
+
 ### T6 — Validation gates
-- depends_on: [T1, T2, T3, T5]
+- depends_on: [T1, T2, T3, T5, T7]
 - owner: qa
 - description:
   - Run build/smoke checks and document mobile smoke checklist.

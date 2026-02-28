@@ -3,7 +3,16 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Briefcase, FileText, LayoutDashboard, MessageSquare, Settings, Sparkles } from 'lucide-react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
-import { Application, AuthUser, CVData, CandidateProfile, Document, LinkedinImportJob, Opportunity } from './types'
+import {
+  Application,
+  AuthUser,
+  CVData,
+  CandidateIntent,
+  CandidateProfile,
+  Document,
+  LinkedinImportJob,
+  Opportunity,
+} from './types'
 
 import { ApplicationsView } from './components/app/views/ApplicationsView'
 import { AuthView } from './components/app/views/AuthView'
@@ -11,6 +20,7 @@ import { ChatView } from './components/app/views/ChatView'
 import { DashboardView } from './components/app/views/DashboardView'
 import { BuildResumeView } from './components/app/views/BuildResumeView'
 import { DocumentsView } from './components/app/views/DocumentsView'
+import { GuidedQuestionsView } from './components/app/views/GuidedQuestionsView'
 import { LandingPage } from './components/app/views/LandingPage'
 import { ProfileReviewView } from './components/app/views/ProfileReviewView'
 import { SettingsView } from './components/app/views/SettingsView'
@@ -30,6 +40,7 @@ export default function App() {
     if (pathname.startsWith('/dashboard')) return 'dashboard'
     if (pathname.startsWith('/build-resume')) return 'dashboard'
     if (pathname.startsWith('/profile-review')) return 'dashboard'
+    if (pathname.startsWith('/guided-questions')) return 'dashboard'
     if (pathname === '/' || pathname.startsWith('/home')) return 'home'
     return 'dashboard'
   }
@@ -54,6 +65,7 @@ export default function App() {
 
   const [cvs, setCvs] = useState<CVData[]>([])
   const [profiles, setProfiles] = useState<CandidateProfile[]>([])
+  const [candidateIntent, setCandidateIntent] = useState<CandidateIntent | null>(null)
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [applications, setApplications] = useState<Application[]>([])
   const [documents, setDocuments] = useState<Document[]>([])
@@ -63,8 +75,10 @@ export default function App() {
   const [profileError, setProfileError] = useState<string | null>(null)
   const [isExtractingProfile, setIsExtractingProfile] = useState(false)
   const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [isSavingIntent, setIsSavingIntent] = useState(false)
   const [linkedinImportJob, setLinkedinImportJob] = useState<LinkedinImportJob | null>(null)
   const [linkedinImportError, setLinkedinImportError] = useState<string | null>(null)
+  const [intentError, setIntentError] = useState<string | null>(null)
   const [isStartingLinkedinImport, setIsStartingLinkedinImport] = useState(false)
 
   useEffect(() => {
@@ -90,6 +104,7 @@ export default function App() {
     setAuthError(null)
     setCvs([])
     setProfiles([])
+    setCandidateIntent(null)
     setOpportunities([])
     setApplications([])
     setDocuments([])
@@ -255,6 +270,22 @@ export default function App() {
     }
   }
 
+  const loadCandidateIntent = async () => {
+    if (!accessToken) {
+      setCandidateIntent(null)
+      return
+    }
+    try {
+      const res = await authedFetch('/api/intent')
+      if (!res.ok) return
+      const data = await res.json()
+      setCandidateIntent(data?.intent ? (data.intent as CandidateIntent) : null)
+      setIntentError(null)
+    } catch {
+      // ignore
+    }
+  }
+
   const extractProfileFromCv = async (cvId: string) => {
     setProfileError(null)
     setIsExtractingProfile(true)
@@ -292,6 +323,30 @@ export default function App() {
       setProfileError(e?.message || 'Failed to save profile')
     } finally {
       setIsSavingProfile(false)
+    }
+  }
+
+  const saveCandidateIntent = async (payload: Partial<CandidateIntent>) => {
+    setIsSavingIntent(true)
+    setIntentError(null)
+    try {
+      const res = await authedFetch('/api/intent', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const t = await res.text().catch(() => '')
+        throw new Error(t || 'Failed to save guided intent')
+      }
+      const data = await res.json()
+      setCandidateIntent(data?.intent ? (data.intent as CandidateIntent) : null)
+      setIntentError(null)
+    } catch (e: any) {
+      setIntentError(e?.message || 'Failed to save guided intent')
+      throw e
+    } finally {
+      setIsSavingIntent(false)
     }
   }
 
@@ -440,6 +495,7 @@ export default function App() {
       setAuthUser(null)
       setAuthError(null)
       setCvs([])
+      setCandidateIntent(null)
       return
     }
     hydrateAuthUser(accessToken)
@@ -450,6 +506,7 @@ export default function App() {
     if (accessToken && authUser) {
       loadCvs()
       loadProfiles()
+      loadCandidateIntent()
       loadOpportunities()
       loadApplications()
       loadDocuments()
@@ -559,6 +616,7 @@ export default function App() {
                       profileError={profileError}
                       onUploadCv={uploadCv}
                       onOpenBuildResume={() => navigate('/build-resume')}
+                      onOpenGuidedQuestions={() => navigate('/guided-questions')}
                       onExtractProfile={extractProfileFromCv}
                       onCreateApplication={createApplication}
                       onCreateDocument={createDocument}
@@ -596,6 +654,20 @@ export default function App() {
                       onGoDashboard={() => navigate('/dashboard')}
                       onExtractProfile={extractProfileFromCv}
                       onSaveProfilePreferences={saveProfilePreferences}
+                    />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/guided-questions"
+                element={
+                  <ProtectedRoute>
+                    <GuidedQuestionsView
+                      intent={candidateIntent}
+                      intentError={intentError}
+                      isSavingIntent={isSavingIntent}
+                      onSaveIntent={saveCandidateIntent}
+                      onGoDashboard={() => navigate('/dashboard')}
                     />
                   </ProtectedRoute>
                 }

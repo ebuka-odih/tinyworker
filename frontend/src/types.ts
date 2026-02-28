@@ -54,6 +54,25 @@ export interface CandidateProfile {
   updatedAt?: string
 }
 
+export interface CandidateIntent {
+  id: string
+  goal?: 'job' | 'scholarship' | 'visa' | 'mixed' | null
+  targetRoles?: string[] | null
+  targetLocations?: string[] | null
+  workModes?: Array<'remote' | 'hybrid' | 'onsite'> | null
+  industries?: string[] | null
+  salaryCurrency?: string | null
+  salaryMin?: number | null
+  salaryMax?: number | null
+  startTimeline?: string | null
+  visaRequired?: boolean | null
+  constraints?: string[] | null
+  notes?: string | null
+  status?: 'draft' | 'ready'
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface UserProfile {
   name?: string
   email?: string

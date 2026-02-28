@@ -6,6 +6,7 @@ import {
   ExternalLink,
   FileText,
   Linkedin,
+  ListChecks,
   Plus,
   Search,
   Sparkles,
@@ -29,6 +30,7 @@ export function DashboardView({
   onUploadCv,
   onOpenBuildResume,
   onExtractProfile,
+  onOpenGuidedQuestions,
   onCreateApplication,
   onCreateDocument,
   onNavigateProfileReview,
@@ -45,6 +47,7 @@ export function DashboardView({
   onUploadCv: (file: File) => Promise<void>
   onOpenBuildResume: () => void
   onExtractProfile: (cvId: string) => Promise<void>
+  onOpenGuidedQuestions: () => void
   onCreateApplication: (opportunityId: string, status?: Application['status']) => Promise<void>
   onCreateDocument: (doc: Pick<Document, 'type' | 'title' | 'content' | 'opportunityId'>) => Promise<void>
   onNavigateProfileReview: () => void
@@ -161,6 +164,21 @@ export function DashboardView({
         </div>
         <Button onClick={onOpenBuildResume} icon={Linkedin}>
           Build Resume
+        </Button>
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
+            <ListChecks size={16} />
+          </div>
+          <div className="text-sm font-bold text-slate-800">Guided Question Flow</div>
+        </div>
+        <div className="text-xs text-slate-500 mb-3">
+          Define your intent with a step-by-step wizard so matching and ranking can use durable preferences.
+        </div>
+        <Button onClick={onOpenGuidedQuestions} variant="outline" icon={ListChecks}>
+          Open Guided Questions
         </Button>
       </Card>
 

@@ -20,8 +20,34 @@ model User {
   opportunities Opportunity[]
   applications  Application[]
   documents     Document[]
+  intents       CandidateIntent[]
 
   @@index([createdAt])
+}
+
+model CandidateIntent {
+  id              String   @id @default(uuid())
+  userId          String
+  goal            String?
+  targetRoles     Json?
+  targetLocations Json?
+  workModes       Json?
+  industries      Json?
+  salaryCurrency  String?
+  salaryMin       Int?
+  salaryMax       Int?
+  startTimeline   String?
+  visaRequired    Boolean?
+  constraints     Json?
+  notes           String?  @db.Text
+  status          String   @default("draft") // draft|ready
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status])
 }
 
 model CV {

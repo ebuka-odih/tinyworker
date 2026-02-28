@@ -12,6 +12,7 @@ import { OpportunitiesModule } from './opportunities/opportunities.module'
 import { ApplicationsModule } from './applications/applications.module'
 import { DocumentsModule } from './documents/documents.module'
 import { TelegramModule } from './telegram/telegram.module'
+import { IntentModule } from './intent/intent.module'
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { TelegramModule } from './telegram/telegram.module'
     ApplicationsModule,
     DocumentsModule,
     TelegramModule,
+    IntentModule,
   ],
   controllers: [AppController],
   providers: [AppService],
