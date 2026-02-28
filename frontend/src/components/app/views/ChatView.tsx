@@ -6,6 +6,219 @@ import { ChatMessage, Opportunity } from '../../../types'
 import { tinyfishService } from '../../../services/tinyfishService'
 import { Badge, Button, Card } from '../AppPrimitives'
 
+type FlowDomain = 'jobs' | 'scholarships'
+
+type FlowStep = {
+  key: string
+  prompt: string
+  options: string[]
+  manualTextAccepted?: boolean
+  manualPrompt?: string
+}
+
+type FlowState = {
+  domain: FlowDomain
+  stepIndex: number
+  criteria: Record<string, string>
+}
+
+const ROOT_OPTIONS = ['Scholarships', 'Jobs', 'Visa Requirements', 'Upload CV']
+const REVIEW_OPTIONS = ['Run search', 'Edit', 'Save & monitor']
+
+const JOB_STEPS: FlowStep[] = [
+  {
+    key: 'job_level',
+    prompt: 'What role level are you targeting?',
+    options: ['Internship', 'Entry', 'Mid-level', 'Senior'],
+  },
+  {
+    key: 'job_title',
+    prompt: 'Title keywords? Choose one or type manually.',
+    options: [
+      'Backend Developer',
+      'Customer Support Specialist',
+      'Sales Executive',
+      'Marketing Specialist',
+      'Copywriter',
+      'Fullstack Developer',
+      'AI Engineer',
+      'Type manually',
+    ],
+    manualTextAccepted: true,
+    manualPrompt: 'Type your preferred title keywords.',
+  },
+  {
+    key: 'job_focus',
+    prompt: 'Industry or field focus?',
+    options: ['Software', 'Marketing', 'Sales', 'Operations', 'Customer Service', 'Any', 'Type manually'],
+    manualTextAccepted: true,
+    manualPrompt: 'Type your preferred focus area (for example: FinTech, HealthTech, E-commerce).',
+  },
+  {
+    key: 'job_location',
+    prompt: 'Target country/location? Choose one or type manually.',
+    options: ['Global', 'UK', 'US', 'Canada', 'Germany', 'Nigeria', 'Type manually'],
+    manualTextAccepted: true,
+    manualPrompt: 'Type target location (country/city or Remote).',
+  },
+  {
+    key: 'job_mode',
+    prompt: 'Preferred work mode?',
+    options: ['Remote', 'Hybrid', 'Onsite'],
+  },
+  {
+    key: 'job_source',
+    prompt: 'Preferred source(s)?',
+    options: ['LinkedIn Jobs', 'Indeed', 'Jobberman', 'MyJobMag', 'Djinni', 'Company Career Pages', 'All + Other Trusted Sites'],
+  },
+  {
+    key: 'job_stack',
+    prompt: 'Skills/tools to prioritize? Choose, skip, or type manually.',
+    options: ['Excel', 'CRM', 'Canva', 'Python', 'Laravel', 'Skip', 'Type manually'],
+    manualTextAccepted: true,
+    manualPrompt: 'Type skills/tools (comma-separated).',
+  },
+  {
+    key: 'job_visa',
+    prompt: 'Need visa sponsorship?',
+    options: ['Yes', 'No', 'Skip'],
+  },
+  {
+    key: 'job_salary',
+    prompt: 'Salary band?',
+    options: ['Under N300k/month', 'N300k - N700k/month', 'N700k - N1.5m/month', 'Above N1.5m/month', 'Skip', 'Type manually'],
+    manualTextAccepted: true,
+    manualPrompt: 'Type your salary preference.',
+  },
+  {
+    key: 'job_company',
+    prompt: 'Company type?',
+    options: ['Startup', 'Enterprise', 'Any'],
+  },
+  {
+    key: 'review',
+    prompt: 'Review your job criteria before running search.',
+    options: REVIEW_OPTIONS,
+  },
+]
+
+const SCHOLARSHIP_STEPS: FlowStep[] = [
+  {
+    key: 'sch_level',
+    prompt: 'What are you looking for?',
+    options: ["Master's", 'PhD', 'Short course', 'Exchange'],
+  },
+  {
+    key: 'sch_country',
+    prompt: 'Destination country? Choose one or type manually.',
+    options: ['Germany', 'Canada', 'UK', 'USA', 'Type manually'],
+    manualTextAccepted: true,
+    manualPrompt: 'Type your destination country.',
+  },
+  {
+    key: 'sch_field',
+    prompt: 'Field/program keywords?',
+    options: [
+      'Artificial Intelligence / Machine Learning',
+      'Computer Science',
+      'Data Science',
+      'Business / MBA',
+      'Engineering',
+      'Public Health',
+      'Any',
+      'Type manually',
+    ],
+    manualTextAccepted: true,
+    manualPrompt: 'Type your field/program keywords.',
+  },
+  {
+    key: 'sch_funding',
+    prompt: 'Funding level?',
+    options: ['Full', 'Partial', 'Any'],
+  },
+  {
+    key: 'sch_tuition',
+    prompt: 'Tuition preference?',
+    options: ['Full tuition', 'Half tuition', 'Any'],
+  },
+  {
+    key: 'sch_intake',
+    prompt: 'Preferred intake season?',
+    options: ['Summer', 'Winter', 'Any'],
+  },
+  {
+    key: 'sch_year',
+    prompt: 'Which intake year?',
+    options: ['2026', '2027', '2028', 'Type manually'],
+    manualTextAccepted: true,
+    manualPrompt: 'Type intake year (example: 2026).',
+  },
+  {
+    key: 'sch_eligibility_text',
+    prompt: 'Any eligibility notes?',
+    options: ['No special constraints', 'Use my profile only', 'Type manually'],
+    manualTextAccepted: true,
+    manualPrompt: 'Type eligibility notes or constraints.',
+  },
+  {
+    key: 'sch_deadline',
+    prompt: 'Deadline urgency?',
+    options: ['Deadline within 30 days', 'Deadline within 60 days', 'Deadline within 90 days', 'Any deadline'],
+  },
+  {
+    key: 'review',
+    prompt: 'Review your scholarship criteria before running search.',
+    options: REVIEW_OPTIONS,
+  },
+]
+
+function stepsForDomain(domain: FlowDomain): FlowStep[] {
+  return domain === 'jobs' ? JOB_STEPS : SCHOLARSHIP_STEPS
+}
+
+function normalizeText(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function withStepLabel(domain: FlowDomain, stepIndex: number, prompt: string): string {
+  const total = stepsForDomain(domain).length
+  return `Step ${stepIndex + 1}/${total}\n${prompt}`
+}
+
+function buildReviewSummary(flow: FlowState): string {
+  const c = flow.criteria
+  if (flow.domain === 'jobs') {
+    return [
+      withStepLabel('jobs', flow.stepIndex, 'Review your job criteria.'),
+      '',
+      `- Role level: ${c.job_level || 'Any'}`,
+      `- Title keywords: ${c.job_title || 'Any'}`,
+      `- Industry/field: ${c.job_focus || 'Any'}`,
+      `- Location: ${c.job_location || 'Any'}`,
+      `- Work mode: ${c.job_mode || 'Any'}`,
+      `- Source: ${c.job_source || 'Any'}`,
+      `- Skills/tools: ${c.job_stack || 'Any'}`,
+      `- Visa sponsorship: ${c.job_visa || 'Skip'}`,
+      `- Salary: ${c.job_salary || 'Skip'}`,
+      `- Company type: ${c.job_company || 'Any'}`,
+    ].join('\n')
+  }
+
+  return [
+    withStepLabel('scholarships', flow.stepIndex, 'Review your scholarship criteria.'),
+    '',
+    `- Level: ${c.sch_level || 'Any'}`,
+    `- Destination country: ${c.sch_country || 'Any'}`,
+    `- Field: ${c.sch_field || 'Any'}`,
+    `- Funding: ${c.sch_funding || 'Any'}`,
+    `- Tuition: ${c.sch_tuition || 'Any'}`,
+    `- Intake season: ${c.sch_intake || 'Any'}`,
+    `- Intake year: ${c.sch_year || 'Any'}`,
+    `- Eligibility notes: ${c.sch_eligibility_text || 'None'}`,
+    `- Deadline urgency: ${c.sch_deadline || 'Any'}`,
+  ].join('\n')
+}
+
 export function ChatView({
   onImportOpportunities,
   onViewDetails,
@@ -19,12 +232,17 @@ export function ChatView({
       content:
         "Hi! I'm your Opportunity Agent. I can help you find scholarships, jobs, or visa requirements. What's our goal today?",
       type: 'options',
-      options: ['Scholarships', 'Jobs', 'Visa Requirements', 'Upload CV'],
+      options: ROOT_OPTIONS,
     },
   ])
   const [isTyping, setIsTyping] = useState(false)
   const [inputValue, setInputValue] = useState('')
+  const [flow, setFlow] = useState<FlowState | null>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
+
+  const appendAssistantMessage = (message: Omit<ChatMessage, 'role'>) => {
+    setMessages((prev) => [...prev, { role: 'assistant', ...message }])
+  }
 
   const scrollToBottom = () => {
     const el = scrollRef.current
@@ -36,115 +254,232 @@ export function ChatView({
     scrollToBottom()
   }, [messages, isTyping])
 
-  const handleOption = async (option: string) => {
-    const userMsg: ChatMessage = { role: 'user', content: option }
-    setMessages((prev) => [...prev, userMsg])
-    setIsTyping(true)
+  const askCurrentStep = (nextFlow: FlowState) => {
+    const step = stepsForDomain(nextFlow.domain)[nextFlow.stepIndex]
+    if (step.key === 'review') {
+      appendAssistantMessage({
+        content: buildReviewSummary(nextFlow),
+        type: 'options',
+        options: step.options,
+      })
+      return
+    }
 
-    setTimeout(async () => {
-      if (option === 'Scholarships') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content:
-              'Excellent choice. Scholarships can be life-changing. To give you the best matches, which country are you targeting for your studies?',
-            type: 'options',
-            options: ['USA', 'UK', 'Germany', 'Canada', 'Other'],
-          },
-        ])
-      } else if (option === 'Jobs') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content:
-              "I'll help you find the perfect role. I'll cross-reference your CV with live listings. What's your primary field of expertise?",
-            type: 'options',
-            options: ['Software Engineering', 'Data Science', 'Marketing', 'Design', 'Other'],
-          },
-        ])
-      } else if (['USA', 'UK', 'Germany', 'Canada'].includes(option)) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: `Understood. I'm now connecting to the official education databases in ${option} and filtering for high-value scholarships matching your profile...`,
-            type: 'progress',
-          },
-        ])
-
-        setTimeout(async () => {
-          setMessages((prev) =>
-            prev.map((m, i) =>
-              i === prev.length - 1
-                ? { ...m, content: 'Found 12 potential matches. Analyzing eligibility criteria for each...' }
-                : m,
-            ),
-          )
-
-          setTimeout(async () => {
-            const results: Opportunity[] = []
-            setMessages((prev) => [
-              ...prev.slice(0, -1),
-              {
-                role: 'assistant',
-                content: 'Scholarship search is coming next. For now, Jobs search is enabled.',
-                type: 'results',
-                results,
-              },
-            ])
-            setIsTyping(false)
-          }, 1500)
-        }, 1500)
-        return
-      } else if (option === 'Software Engineering') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content:
-              'Great. I\'m scanning top-tier tech hubs and companies offering visa sponsorship for Software Engineers...',
-            type: 'progress',
-          },
-        ])
-
-        setTimeout(async () => {
-          const results = await tinyfishService.searchJobsLinkedIn('Software Engineering visa sponsorship')
-          await onImportOpportunities(results)
-          setMessages((prev) => [
-            ...prev.slice(0, -1),
-            {
-              role: 'assistant',
-              content: 'Here are roles I found on LinkedIn (public search):',
-              type: 'results',
-              results,
-            },
-          ])
-          setIsTyping(false)
-        }, 2000)
-        return
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content:
-              "I'm processing your request. Let's head to your dashboard to see the full analysis and tailored recommendations.",
-            type: 'options',
-            options: ['Go to Dashboard'],
-          },
-        ])
-      }
-      setIsTyping(false)
-    }, 1000)
+    appendAssistantMessage({
+      content: withStepLabel(nextFlow.domain, nextFlow.stepIndex, step.prompt),
+      type: 'options',
+      options: step.options,
+    })
   }
 
-  const handleSend = () => {
+  const restartFlow = (domain: FlowDomain) => {
+    const nextFlow: FlowState = { domain, stepIndex: 0, criteria: {} }
+    setFlow(nextFlow)
+    askCurrentStep(nextFlow)
+  }
+
+  const runJobSearch = async (criteria: Record<string, string>) => {
+    setIsTyping(true)
+    appendAssistantMessage({
+      content: 'Running jobs search with your criteria and scanning live listings...',
+      type: 'progress',
+    })
+
+    try {
+      const title = criteria.job_title && normalizeText(criteria.job_title) !== 'skip' ? criteria.job_title : 'Software Engineer'
+      const focus = criteria.job_focus && normalizeText(criteria.job_focus) !== 'any' ? criteria.job_focus : ''
+      const location = criteria.job_location && normalizeText(criteria.job_location) !== 'global' ? criteria.job_location : 'Remote'
+      const visaHint = normalizeText(criteria.job_visa || '') === 'yes' ? 'visa sponsorship' : ''
+      const query = [title, focus, location, visaHint].filter(Boolean).join(' ').trim()
+
+      const results = await tinyfishService.searchJobsLinkedIn(query)
+      await onImportOpportunities(results)
+
+      appendAssistantMessage({
+        content: 'Search complete. Here are roles I found:',
+        type: 'results',
+        results,
+      })
+      appendAssistantMessage({
+        content: 'You can start a new search or open dashboard details.',
+        type: 'options',
+        options: ['New Jobs Search', 'Go to Dashboard'],
+      })
+    } catch (e: any) {
+      appendAssistantMessage({
+        content: e?.message || 'Job search failed. Please try again.',
+      })
+      appendAssistantMessage({
+        content: 'Choose next action.',
+        type: 'options',
+        options: ['Retry Jobs Search', 'Go to Dashboard'],
+      })
+    } finally {
+      setFlow(null)
+      setIsTyping(false)
+    }
+  }
+
+  const runScholarshipSearch = async () => {
+    appendAssistantMessage({
+      content:
+        'Scholarship live search integration is next. Your scholarship criteria has been captured and is ready for backend execution.',
+    })
+    appendAssistantMessage({
+      content: 'Choose next action.',
+      type: 'options',
+      options: ['New Scholarships Search', 'Go to Dashboard'],
+    })
+    setFlow(null)
+  }
+
+  const handleRootInput = async (value: string) => {
+    const normalized = normalizeText(value)
+    if (normalized === normalizeText('Jobs') || normalized === normalizeText('New Jobs Search') || normalized === normalizeText('Retry Jobs Search')) {
+      restartFlow('jobs')
+      return
+    }
+
+    if (normalized === normalizeText('Scholarships') || normalized === normalizeText('New Scholarships Search')) {
+      restartFlow('scholarships')
+      return
+    }
+
+    if (normalized === normalizeText('Go to Dashboard')) {
+      onViewDetails()
+      return
+    }
+
+    if (normalized === normalizeText('Visa Requirements')) {
+      appendAssistantMessage({
+        content: 'Visa flow in web chat is not yet wired. For now, use Jobs or Scholarships flow.',
+        type: 'options',
+        options: ROOT_OPTIONS,
+      })
+      return
+    }
+
+    if (normalized === normalizeText('Upload CV')) {
+      appendAssistantMessage({
+        content: 'Use Dashboard -> Upload CV, then return here for guided matching.',
+        type: 'options',
+        options: ['Go to Dashboard', 'Jobs', 'Scholarships'],
+      })
+      return
+    }
+
+    appendAssistantMessage({
+      content: 'Pick a flow to continue.',
+      type: 'options',
+      options: ROOT_OPTIONS,
+    })
+  }
+
+  const handleFlowInput = async (value: string) => {
+    if (!flow) return
+
+    const steps = stepsForDomain(flow.domain)
+    const step = steps[flow.stepIndex]
+    const normalized = normalizeText(value)
+
+    if (step.key === 'review') {
+      if (normalized === normalizeText('Run search')) {
+        if (flow.domain === 'jobs') {
+          await runJobSearch(flow.criteria)
+        } else {
+          await runScholarshipSearch()
+        }
+        return
+      }
+
+      if (normalized === normalizeText('Edit')) {
+        restartFlow(flow.domain)
+        return
+      }
+
+      if (normalized === normalizeText('Save & monitor')) {
+        appendAssistantMessage({
+          content: 'Save & monitor is captured. Monitor automation wiring will be enabled in the next phase.',
+          type: 'options',
+          options: ['Run search', 'Edit'],
+        })
+        return
+      }
+
+      appendAssistantMessage({
+        content: 'Choose one of the review actions.',
+        type: 'options',
+        options: REVIEW_OPTIONS,
+      })
+      return
+    }
+
+    const matched = step.options.find((opt) => normalizeText(opt) === normalized)
+    if (matched && normalizeText(matched) === normalizeText('Type manually')) {
+      appendAssistantMessage({
+        content: step.manualPrompt || 'Type your answer in the input below.',
+      })
+      return
+    }
+
+    if (!matched && !step.manualTextAccepted) {
+      appendAssistantMessage({
+        content: 'Select one of the options to continue.',
+        type: 'options',
+        options: step.options,
+      })
+      return
+    }
+
+    const answer = matched || value.trim()
+    if (!answer) return
+
+    const nextCriteria = { ...flow.criteria, [step.key]: answer }
+    const nextIndex = flow.stepIndex + 1
+
+    if (nextIndex >= steps.length) {
+      setFlow(null)
+      appendAssistantMessage({
+        content: 'Flow completed.',
+        type: 'options',
+        options: ROOT_OPTIONS,
+      })
+      return
+    }
+
+    const nextFlow: FlowState = {
+      domain: flow.domain,
+      stepIndex: nextIndex,
+      criteria: nextCriteria,
+    }
+
+    setFlow(nextFlow)
+    askCurrentStep(nextFlow)
+  }
+
+  const handleUserInput = async (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed || isTyping) return
+
+    setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+
+    if (!flow) {
+      await handleRootInput(trimmed)
+      return
+    }
+
+    await handleFlowInput(trimmed)
+  }
+
+  const handleOption = async (option: string) => {
+    await handleUserInput(option)
+  }
+
+  const handleSend = async () => {
     if (!inputValue.trim()) return
-    const val = inputValue
+    const value = inputValue
     setInputValue('')
-    handleOption(val)
+    await handleUserInput(value)
   }
 
   return (
@@ -183,7 +518,7 @@ export function ChatView({
           >
             <div className="max-w-[85%] space-y-3">
               <div
-                className={`p-4 rounded-2xl shadow-sm leading-relaxed text-sm ${
+                className={`p-4 rounded-2xl shadow-sm leading-relaxed text-sm whitespace-pre-line ${
                   msg.role === 'user'
                     ? 'bg-slate-900 text-white rounded-br-none font-medium'
                     : 'bg-white text-slate-800 rounded-bl-none border border-slate-100'
@@ -258,15 +593,19 @@ export function ChatView({
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                void handleSend()
+              }
+            }}
             placeholder="Ask me anything..."
             className="flex-1 bg-transparent border-none rounded-xl px-3 md:px-4 py-2 focus:outline-none text-sm text-slate-700"
           />
-          <Button variant="primary" className="px-4 rounded-xl py-2" onClick={handleSend} disabled={!inputValue.trim()}>
+          <Button variant="primary" className="px-4 rounded-xl py-2" onClick={() => void handleSend()} disabled={!inputValue.trim() || isTyping}>
             <ArrowRight size={20} />
           </Button>
         </div>
-        <p className="text-[10px] text-center text-slate-400 mt-1 md:mt-2 font-medium">Click options above or type to search</p>
+        <p className="text-[10px] text-center text-slate-400 mt-1 md:mt-2 font-medium">Click options above or type to continue</p>
       </div>
     </div>
   )
