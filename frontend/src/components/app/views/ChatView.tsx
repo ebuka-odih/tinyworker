@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, ExternalLink, History, LoaderCircle, MessageSquarePlus, Search, Settings, Sparkles, Upload } from 'lucide-react'
+import { ArrowRight, ExternalLink, History, LoaderCircle, MessageSquarePlus, Search, Settings, Sparkles, Trash2, Upload } from 'lucide-react'
 import { motion } from 'motion/react'
 
 import {
@@ -518,6 +518,40 @@ export function ChatView({
     setAwaitingLinkedinUrlSessionId(null)
   }
 
+  const deleteSession = (sessionId: string) => {
+    const target = sessions.find((session) => session.id === sessionId)
+    const label = target?.title?.trim() || 'New Search'
+    const isBusy = busySessionIds.includes(sessionId)
+    const confirmed = window.confirm(
+      isBusy
+        ? `Delete "${label}" chat history? A search is still running for this chat.`
+        : `Delete "${label}" chat history? This cannot be undone.`,
+    )
+    if (!confirmed) return
+
+    setSessions((prev) => {
+      const remaining = prev.filter((session) => session.id !== sessionId)
+      if (!remaining.length) {
+        const seed = createSession()
+        setActiveSessionId(seed.id)
+        return [seed]
+      }
+
+      const activeStillExists = remaining.some((session) => session.id === activeSessionId)
+      if (activeSessionId === sessionId || !activeStillExists) {
+        const [nextActive] = [...remaining].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        if (nextActive) setActiveSessionId(nextActive.id)
+      }
+      return remaining
+    })
+
+    setBusySessionIds((prev) => prev.filter((id) => id !== sessionId))
+    setAwaitingLinkedinUrlSessionId((prev) => (prev === sessionId ? null : prev))
+    setInputValue('')
+    setWorkspaceMode('chat')
+    setIsMobileHistoryOpen(false)
+  }
+
   const restartFlow = (sessionId: string, domain: FlowDomain) => {
     const nextFlow: FlowState = { domain, stepIndex: 0, criteria: {} }
     setSessionFlow(sessionId, nextFlow)
@@ -945,20 +979,36 @@ export function ChatView({
             const preview = session.messages.filter((m) => m.role === 'user').slice(-1)[0]?.content || 'No messages yet'
             const active = session.id === activeSession.id
             return (
-              <button
-                key={session.id}
-                onClick={() => {
-                  setActiveSessionId(session.id)
-                  setInputValue('')
-                }}
-                className={`w-full text-left p-3 rounded-xl border transition-colors ${
-                  active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white hover:border-slate-400'
-                }`}
-              >
-                <div className="text-xs font-bold truncate">{session.title || 'New Search'}</div>
-                <div className={`text-[11px] mt-1 truncate ${active ? 'text-slate-200' : 'text-slate-500'}`}>{safePreview(preview)}</div>
-                <div className={`text-[10px] mt-1 ${active ? 'text-slate-300' : 'text-slate-400'}`}>{formatUpdatedAt(session.updatedAt)}</div>
-              </button>
+              <div key={session.id} className="relative">
+                <button
+                  onClick={() => {
+                    setActiveSessionId(session.id)
+                    setInputValue('')
+                  }}
+                  className={`w-full text-left p-3 pr-10 rounded-xl border transition-colors ${
+                    active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white hover:border-slate-400'
+                  }`}
+                >
+                  <div className="text-xs font-bold truncate">{session.title || 'New Search'}</div>
+                  <div className={`text-[11px] mt-1 truncate ${active ? 'text-slate-200' : 'text-slate-500'}`}>{safePreview(preview)}</div>
+                  <div className={`text-[10px] mt-1 ${active ? 'text-slate-300' : 'text-slate-400'}`}>{formatUpdatedAt(session.updatedAt)}</div>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteSession(session.id)
+                  }}
+                  className={`absolute right-2 top-2 p-1.5 rounded-md transition-colors ${
+                    active
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                  }`}
+                  title="Delete chat"
+                  aria-label={`Delete ${session.title || 'chat'}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             )
           })}
         </div>
@@ -1028,22 +1078,38 @@ export function ChatView({
               <MessageSquarePlus size={14} /> New Search
             </Button>
             {sortedSessions.map((session) => (
-              <button
-                key={session.id}
-                onClick={() => {
-                  setActiveSessionId(session.id)
-                  setInputValue('')
-                  setIsMobileHistoryOpen(false)
-                }}
-                className={`w-full text-left p-3 rounded-xl border ${
-                  session.id === activeSession.id ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white'
-                }`}
-              >
-                <div className="text-xs font-bold truncate">{session.title || 'New Search'}</div>
-                <div className={`text-[10px] mt-1 ${session.id === activeSession.id ? 'text-slate-300' : 'text-slate-400'}`}>
-                  {formatUpdatedAt(session.updatedAt)}
-                </div>
-              </button>
+              <div key={session.id} className="relative">
+                <button
+                  onClick={() => {
+                    setActiveSessionId(session.id)
+                    setInputValue('')
+                    setIsMobileHistoryOpen(false)
+                  }}
+                  className={`w-full text-left p-3 pr-10 rounded-xl border ${
+                    session.id === activeSession.id ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <div className="text-xs font-bold truncate">{session.title || 'New Search'}</div>
+                  <div className={`text-[10px] mt-1 ${session.id === activeSession.id ? 'text-slate-300' : 'text-slate-400'}`}>
+                    {formatUpdatedAt(session.updatedAt)}
+                  </div>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteSession(session.id)
+                  }}
+                  className={`absolute right-2 top-2 p-1.5 rounded-md transition-colors ${
+                    session.id === activeSession.id
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                  }`}
+                  title="Delete chat"
+                  aria-label={`Delete ${session.title || 'chat'}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))}
           </div>
         ) : null}
