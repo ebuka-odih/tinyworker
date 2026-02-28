@@ -676,7 +676,24 @@ export default function App() {
                 path="/chat"
                 element={
                   <ProtectedRoute>
-                    <ChatView onImportOpportunities={importOpportunities} onViewDetails={() => navigate('/dashboard')} />
+                    <ChatView
+                      authUser={authUser}
+                      cvs={cvs}
+                      profiles={profiles}
+                      candidateIntent={candidateIntent}
+                      opportunities={opportunities}
+                      applications={applications}
+                      documents={documents}
+                      cvError={cvError}
+                      linkedinImportError={linkedinImportError}
+                      onImportOpportunities={importOpportunities}
+                      onUploadCv={uploadCv}
+                      onStartLinkedinImport={startLinkedinImport}
+                      onCreateApplication={createApplication}
+                      onDeleteDocument={deleteDocument}
+                      onSignOut={signOut}
+                      sessionOwnerId={authUser?.userId || 'anonymous'}
+                    />
                   </ProtectedRoute>
                 }
               />
