@@ -68,6 +68,7 @@ export function DashboardView({
   const [activeActivityIndex, setActiveActivityIndex] = useState(0)
   const latestProfile = profiles[0]
   const cvFileInputRef = React.useRef<HTMLInputElement>(null)
+  const pauseStorageKey = `tinyworker.search.paused.${authUser?.userId || 'anonymous'}`
 
   const primaryRole = candidateIntent?.targetRoles?.[0] || latestProfile?.titleHeadline || 'Backend Engineer'
   const primaryLocation = candidateIntent?.targetLocations?.[0] || 'Germany'
@@ -104,6 +105,23 @@ export function DashboardView({
 
     return () => window.clearInterval(timer)
   }, [activityItems.length, isSearchPaused])
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(pauseStorageKey)
+      setIsSearchPaused(raw === '1')
+    } catch {
+      // ignore storage errors
+    }
+  }, [pauseStorageKey])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(pauseStorageKey, isSearchPaused ? '1' : '0')
+    } catch {
+      // ignore storage errors
+    }
+  }, [isSearchPaused, pauseStorageKey])
 
   const fitLabel = (matchScore?: number) => {
     if (typeof matchScore !== 'number') return 'Potential fit'
@@ -167,7 +185,16 @@ export function DashboardView({
           <Button variant="outline" icon={Edit3} onClick={onOpenGuidedQuestions}>
             Refine goal
           </Button>
-          <Button variant="ghost" icon={isSearchPaused ? PlayCircle : PauseCircle} onClick={() => setIsSearchPaused((v) => !v)}>
+          <Button
+            variant="outline"
+            icon={isSearchPaused ? PlayCircle : PauseCircle}
+            onClick={() => setIsSearchPaused((v) => !v)}
+            className={
+              isSearchPaused
+                ? 'border-2 border-emerald-400 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                : 'border-2 border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100'
+            }
+          >
             {isSearchPaused ? 'Resume search' : 'Pause search'}
           </Button>
         </div>
