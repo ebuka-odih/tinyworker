@@ -20,6 +20,9 @@ const MEDIUM_TASK_POLL_MS = 7500
 const LONG_TASK_POLL_MS = 30000
 
 function tinyfishApiBase(): string {
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('vercel.app')) {
+    return '/api/tinyfish'
+  }
   // Default to same-origin API path (works with frontend rewrite/proxy, avoids CORS).
   // Use explicit env override only when you intentionally want cross-origin direct backend calls.
   const directFromEnv =
