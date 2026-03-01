@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, ExternalLink, History, LoaderCircle, MessageSquarePlus, Search, Settings, Sparkles, Trash2, Upload } from 'lucide-react'
 import { motion } from 'motion/react'
+import { useLocation } from 'react-router-dom'
 
 import {
   Application,
@@ -320,6 +321,7 @@ export function ChatView({
   onSignOut: () => void
   sessionOwnerId: string
 }) {
+  const location = useLocation()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [isHydrated, setIsHydrated] = useState(false)
@@ -330,8 +332,13 @@ export function ChatView({
   const [awaitingLinkedinUrlSessionId, setAwaitingLinkedinUrlSessionId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const autoIntentSearchHandledRef = useRef<string | null>(null)
 
   const storageKey = useMemo(() => storageKeyForOwner(sessionOwnerId || 'anon'), [sessionOwnerId])
+  const intentSearchSignal = useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    return params.get('intentSearch')
+  }, [location.search])
 
   const sortedSessions = useMemo(
     () => [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
@@ -680,6 +687,89 @@ export function ChatView({
 
     setSessionFlow(sessionId, null)
   }
+
+  const buildIntentJobCriteria = (intent: CandidateIntent | null): Record<string, string> => {
+    const roles = Array.isArray(intent?.targetRoles) ? intent?.targetRoles.filter(Boolean) : []
+    const locations = Array.isArray(intent?.targetLocations) ? intent?.targetLocations.filter(Boolean) : []
+    const industries = Array.isArray(intent?.industries) ? intent?.industries.filter(Boolean) : []
+    const modes = Array.isArray(intent?.workModes) ? intent?.workModes.filter(Boolean) : []
+
+    const salaryLabel =
+      typeof intent?.salaryMin === 'number' || typeof intent?.salaryMax === 'number'
+        ? `${intent.salaryCurrency || ''} ${intent.salaryMin ?? '?'} - ${intent.salaryMax ?? '?'}`.trim()
+        : 'Skip'
+
+    return {
+      job_level: 'Mid-level',
+      job_title: roles.length ? roles.join(', ') : 'Software Engineer',
+      job_focus: industries[0] || 'Any',
+      job_location: locations[0] || 'Global',
+      job_mode: modes[0] || 'Remote',
+      job_source: 'All + Other Trusted Sites',
+      job_stack: 'Skip',
+      job_visa: intent?.visaRequired === true ? 'Yes' : intent?.visaRequired === false ? 'No' : 'Skip',
+      job_salary: salaryLabel,
+      job_company: 'Any',
+    }
+  }
+
+  useEffect(() => {
+    if (!isHydrated || !intentSearchSignal) return
+    if (autoIntentSearchHandledRef.current === intentSearchSignal) return
+
+    autoIntentSearchHandledRef.current = intentSearchSignal
+
+    const nextSession = createSession('Intent Search')
+    setSessions((prev) => [nextSession, ...prev])
+    setActiveSessionId(nextSession.id)
+    setWorkspaceMode('chat')
+    setInputValue('')
+    setIsMobileHistoryOpen(false)
+    setAwaitingLinkedinUrlSessionId(null)
+
+    appendAssistantMessage(nextSession.id, {
+      content: 'Using your saved criteria. Starting search now.',
+    })
+
+    const goal = candidateIntent?.goal || 'job'
+
+    if (goal === 'scholarship') {
+      appendAssistantMessage(nextSession.id, {
+        content:
+          'Scholarship live search is not wired yet. Your scholarship intent is saved; use Jobs for live run right now.',
+      })
+      appendAssistantMessage(
+        nextSession.id,
+        {
+          content: 'Choose next action.',
+          type: 'options',
+          options: ['New Scholarships Search', 'Jobs', 'View Matches'],
+        },
+        { type: 'root' },
+      )
+    } else if (goal === 'visa') {
+      appendAssistantMessage(nextSession.id, {
+        content: 'Visa live search in web chat is not wired yet. Your visa intent is saved.',
+      })
+      appendAssistantMessage(
+        nextSession.id,
+        {
+          content: 'Choose next action.',
+          type: 'options',
+          options: ['Jobs', 'Scholarships', 'View Matches'],
+        },
+        { type: 'root' },
+      )
+    } else {
+      void runJobSearch(nextSession.id, buildIntentJobCriteria(candidateIntent))
+    }
+
+    const params = new URLSearchParams(location.search)
+    params.delete('intentSearch')
+    const nextSearch = params.toString()
+    const nextUrl = nextSearch ? `${location.pathname}?${nextSearch}` : location.pathname
+    window.history.replaceState({}, '', nextUrl)
+  }, [candidateIntent, intentSearchSignal, isHydrated, location.pathname, location.search])
 
   const handleRootInput = async (sessionId: string, value: string) => {
     const normalized = normalizeText(value)
