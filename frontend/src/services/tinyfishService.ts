@@ -11,8 +11,7 @@ type JobSearchCriteria = Record<string, string>
 type ConfidenceLevel = 'high' | 'medium' | 'low'
 
 const DEFAULT_JOB_RESULTS_LIMIT = 10
-const DEFAULT_JOB_SOURCES =
-  'LinkedIn Jobs, Indeed, Jobberman, MyJobMag, Djinni (Tech Jobs), Company Career Pages'
+const DEFAULT_JOB_SOURCES = 'LinkedIn Jobs, Google Jobs, Indeed'
 const TINYFISH_PROXY_TIMEOUT_MS = 1000 * 60 * 7
 const MULTI_SOURCE_RUN_TIMEOUT_MS = 1000 * 60 * 12
 const SHORT_TASK_POLL_MS = 2500
@@ -696,78 +695,46 @@ export const tinyfishService = {
   },
 
   async searchJobsMultiSource(query: string, criteria: JobSearchCriteria = {}): Promise<Opportunity[]> {
-    const runs: TinyfishRunRequest[] = [
-      {
-        url: buildLinkedinUrl(query, criteria),
-        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'LinkedIn Jobs', { strictSourceOnly: true }),
-        browser_profile: 'stealth',
-        proxy_config: { enabled: false },
-        feature_flags: { enable_agent_memory: false },
-        api_integration: 'tinyfinder-ui-linkedin',
-      },
-      {
-        url: buildGoogleJobsUrl(query, criteria),
-        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'Google Jobs', { strictSourceOnly: true }),
-        browser_profile: 'stealth',
-        proxy_config: { enabled: false },
-        feature_flags: { enable_agent_memory: false },
-        api_integration: 'tinyfinder-ui-google-jobs',
-      },
-      {
-        url: buildIndeedUrl(query, criteria),
-        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'Indeed', { strictSourceOnly: true }),
-        browser_profile: 'stealth',
-        proxy_config: { enabled: false },
-        feature_flags: { enable_agent_memory: false },
-        api_integration: 'tinyfinder-ui-indeed',
-      },
-    ]
-
-    // Start each source explicitly so sessions are isolated per source.
-    const started = await Promise.allSettled(runs.map((req) => this.runAsync(req)))
-    const runIds = started
-      .flatMap((row) => (row.status === 'fulfilled' ? [String(row.value?.run_id || '').trim()] : []))
-      .filter(Boolean)
-
-    if (!runIds.length) {
-      const startErrors = started
-        .flatMap((row) => (row.status === 'rejected' ? [row.reason?.message || String(row.reason || 'Unknown error')] : []))
-        .slice(0, 3)
-      const detail = startErrors.length ? ` Details: ${startErrors.join(' | ')}` : ''
-      throw new Error(`TinyFish did not return run IDs for async multi-source search.${detail}`)
+    const pinnedCriteria: JobSearchCriteria = {
+      ...criteria,
+      job_source: 'LinkedIn Jobs, Google Jobs, Indeed',
     }
 
-    const uniqueRunIds = Array.from(new Set(runIds))
-    const settled = await Promise.allSettled(uniqueRunIds.map((runId) => this.waitForRunCompletion(runId)))
-
-    const completedPayloads: unknown[] = []
-    const failedReasons: string[] = []
-    for (const item of settled) {
-      if (item.status === 'rejected') {
-        failedReasons.push(item.reason?.message || String(item.reason || 'Unknown async error'))
-        continue
-      }
-
-      const run = item.value
-      const status = String(run.status || '').toUpperCase()
-      if (status === 'COMPLETED') {
-        const payload = extractRunPayload(run)
-        if (payload != null) completedPayloads.push(payload)
-        else failedReasons.push(`Run ${run.run_id} completed without payload`)
-      } else if (status === 'FAILED') {
-        const reason = run.error?.message || run.error?.details || 'Unknown run error'
-        failedReasons.push(String(reason))
-      } else if (status === 'CANCELLED') {
-        failedReasons.push(`Run ${run.run_id} was cancelled`)
-      }
+    const req: TinyfishRunRequest = {
+      url: buildGoogleJobsUrl(query, pinnedCriteria),
+      goal: [
+        buildJobGoal(query, pinnedCriteria, DEFAULT_JOB_RESULTS_LIMIT * 3, 'LinkedIn Jobs, Google Jobs, Indeed'),
+        'For this run, search only these sources: LinkedIn Jobs, Google Jobs, and Indeed.',
+        'Do not use additional job boards outside these three sources.',
+        'Avoid duplicate listings across the three sources.',
+      ].join('\n'),
+      browser_profile: 'stealth',
+      proxy_config: { enabled: false },
+      feature_flags: { enable_agent_memory: false },
+      api_integration: 'tinyfinder-ui-multi-source',
     }
 
-    if (!completedPayloads.length) {
-      const detail = failedReasons.length ? ` Details: ${failedReasons.slice(0, 3).join(' | ')}` : ''
-      throw new Error(`TinyFish multi-source search returned no completed runs.${detail}`)
+    const started = await this.runAsync(req)
+    const runId = String(started?.run_id || '').trim()
+    if (!runId) {
+      throw new Error('TinyFish did not return a run_id for async multi-source search.')
     }
 
-    const mergedRecords = completedPayloads.flatMap((payload) => collectJobRecords(payload))
+    const run = await this.waitForRunCompletion(runId)
+    const status = String(run.status || '').toUpperCase()
+    if (status === 'FAILED') {
+      const reason = run.error?.message || run.error?.details || 'Unknown run error'
+      throw new Error(`TinyFish multi-source search failed. Details: ${String(reason)}`)
+    }
+    if (status === 'CANCELLED') {
+      throw new Error(`TinyFish multi-source search was cancelled (run ${run.run_id}).`)
+    }
+    if (status !== 'COMPLETED') {
+      throw new Error(`TinyFish multi-source search did not complete successfully (status=${status || 'UNKNOWN'}).`)
+    }
+
+    const payload = extractRunPayload(run) ?? run
+    const mergedRecords = collectJobRecords(payload)
     const normalized = normalizeJobs(mergedRecords)
     const opportunities = toOpportunities(normalized.slice(0, DEFAULT_JOB_RESULTS_LIMIT * 3), 'job')
     const deduped = dedupeOpportunities(opportunities)

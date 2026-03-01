@@ -774,6 +774,12 @@ export function ChatView({
   }
 
   const runJobSearch = async (sessionId: string, criteria: Record<string, string>) => {
+    const inFlightToken = runTokenRef.current[sessionId]
+    if (inFlightToken && !stopRequestedRef.current[sessionId]) {
+      setWorkspaceMode('execution')
+      return
+    }
+
     const runToken = makeId('run')
     runTokenRef.current[sessionId] = runToken
     stopRequestedRef.current[sessionId] = false
