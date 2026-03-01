@@ -686,6 +686,7 @@ export default function App() {
                       isSavingIntent={isSavingIntent}
                       hasCv={cvs.length > 0}
                       onSaveIntent={saveCandidateIntent}
+                      onContinueSearch={() => navigate('/chat')}
                       onGoDashboard={() => navigate('/dashboard')}
                     />
                   </ProtectedRoute>
