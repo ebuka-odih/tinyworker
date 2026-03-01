@@ -119,6 +119,31 @@ async function readSseUntilComplete(res: Response): Promise<TinyfishSseEvent> {
     }
   }
 
+  // Some proxies close the stream without a trailing blank line.
+  // Parse any remaining buffered payload as a final event frame.
+  const tail = buffer.trim()
+  if (tail) {
+    const lines = tail.split('\n')
+    const dataLines: string[] = []
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data:')) continue
+      dataLines.push(trimmed.slice('data:'.length).trim())
+    }
+    if (dataLines.length) {
+      const payload = dataLines.join('\n').trim()
+      if (payload && payload !== '[DONE]') {
+        try {
+          const evt = normalizeEvent(JSON.parse(payload))
+          lastEvent = evt
+          if (isTerminal(evt)) return evt
+        } catch {
+          // ignore malformed trailing payload
+        }
+      }
+    }
+  }
+
   return lastEvent || { type: 'ERROR', error: 'Stream ended without terminal event' }
 }
 
