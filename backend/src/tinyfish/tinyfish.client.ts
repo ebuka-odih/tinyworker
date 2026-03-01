@@ -20,9 +20,38 @@ export type TinyfishSseEvent = {
   data?: any
 }
 
+export type TinyfishAsyncRunResponse = {
+  run_id: string | null
+  error?: any
+}
+
+export type TinyfishBatchRunResponse = {
+  run_ids: string[] | null
+  error?: any
+}
+
+export type TinyfishRunStatusResponse = {
+  run_id: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | string
+  goal?: string
+  created_at?: string
+  started_at?: string | null
+  finished_at?: string | null
+  result?: any
+  error?: any
+  streaming_url?: string | null
+  browser_config?: any
+}
+
 const TINYFISH_RUN_SSE_URL =
   process.env.TINYFISH_RUN_SSE_URL || 'https://agent.tinyfish.ai/v1/automation/run-sse'
+const TINYFISH_RUN_ASYNC_URL =
+  process.env.TINYFISH_RUN_ASYNC_URL || 'https://agent.tinyfish.ai/v1/automation/run-async'
+const TINYFISH_RUN_BATCH_URL =
+  process.env.TINYFISH_RUN_BATCH_URL || 'https://agent.tinyfish.ai/v1/automation/run-batch'
+const TINYFISH_RUNS_BASE_URL = process.env.TINYFISH_RUNS_BASE_URL || 'https://agent.tinyfish.ai/v1/runs'
 const TINYFISH_SSE_TIMEOUT_MS = Number(process.env.TINYFISH_SSE_TIMEOUT_MS || 1000 * 60 * 6)
+const TINYFISH_HTTP_TIMEOUT_MS = Number(process.env.TINYFISH_HTTP_TIMEOUT_MS || 1000 * 60)
 
 function readApiKeyFromMissionControlSecrets(): string | null {
   try {
@@ -42,6 +71,32 @@ export function requireTinyfishApiKey(): string {
   const mc = readApiKeyFromMissionControlSecrets()
   if (mc) return mc
   throw new Error('Missing TinyFish API key (env TINYFISH_API_KEY or Mission Control secrets store)')
+}
+
+async function requestTinyfishJson<T>(url: string, init: RequestInit): Promise<T> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), TINYFISH_HTTP_TIMEOUT_MS)
+
+  try {
+    const resp = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    })
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '')
+      throw new Error(`TinyFish HTTP ${resp.status}: ${text || resp.statusText}`)
+    }
+
+    return (await resp.json()) as T
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      throw new Error(`TinyFish request timed out after ${Math.round(TINYFISH_HTTP_TIMEOUT_MS / 1000)}s`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 async function readSseUntilComplete(res: Response): Promise<TinyfishSseEvent> {
@@ -184,4 +239,56 @@ export async function runTinyfish(req: TinyfishRunRequest): Promise<TinyfishSseE
   } finally {
     clearTimeout(timeout)
   }
+}
+
+export async function runTinyfishAsync(req: TinyfishRunRequest): Promise<TinyfishAsyncRunResponse> {
+  const apiKey = requireTinyfishApiKey()
+  return await requestTinyfishJson<TinyfishAsyncRunResponse>(TINYFISH_RUN_ASYNC_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiKey,
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      browser_profile: 'stealth',
+      proxy_config: { enabled: false },
+      feature_flags: { enable_agent_memory: false },
+      api_integration: 'tinyfinder-api',
+      ...req,
+    }),
+  })
+}
+
+export async function runTinyfishBatch(runs: TinyfishRunRequest[]): Promise<TinyfishBatchRunResponse> {
+  const apiKey = requireTinyfishApiKey()
+  return await requestTinyfishJson<TinyfishBatchRunResponse>(TINYFISH_RUN_BATCH_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiKey,
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      runs: runs.map((req) => ({
+        browser_profile: 'stealth',
+        proxy_config: { enabled: false },
+        feature_flags: { enable_agent_memory: false },
+        api_integration: 'tinyfinder-api',
+        ...req,
+      })),
+    }),
+  })
+}
+
+export async function getTinyfishRunById(runId: string): Promise<TinyfishRunStatusResponse> {
+  const apiKey = requireTinyfishApiKey()
+  const safeId = encodeURIComponent(String(runId || '').trim())
+  return await requestTinyfishJson<TinyfishRunStatusResponse>(`${TINYFISH_RUNS_BASE_URL}/${safeId}`, {
+    method: 'GET',
+    headers: {
+      'X-API-Key': apiKey,
+      Accept: 'application/json',
+    },
+  })
 }

@@ -2,13 +2,21 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
+  Param,
   Post,
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common'
 import { z } from 'zod'
 import { JwtAuthGuard } from '../auth/jwt.guard'
-import { runTinyfish, TinyfishRunRequest } from './tinyfish.client'
+import {
+  getTinyfishRunById,
+  runTinyfish,
+  runTinyfishAsync,
+  runTinyfishBatch,
+  TinyfishRunRequest,
+} from './tinyfish.client'
 
 const TinyfishRunSchema = z.object({
   url: z.string().url(),
@@ -28,6 +36,10 @@ const TinyfishRunSchema = z.object({
   api_integration: z.string().optional(),
 })
 
+const TinyfishRunBatchSchema = z.object({
+  runs: z.array(TinyfishRunSchema).min(1).max(20),
+})
+
 @Controller('tinyfish')
 @UseGuards(JwtAuthGuard)
 export class TinyfishController {
@@ -43,6 +55,65 @@ export class TinyfishController {
     try {
       const evt = await runTinyfish(parsed)
       return evt
+    } catch (e: any) {
+      const details = e?.message || String(e)
+      const missingKey = String(details).includes('Missing TinyFish API key')
+      throw new ServiceUnavailableException({
+        error: missingKey ? 'TinyFish API key is not configured on backend' : 'TinyFish is unavailable',
+        details,
+      })
+    }
+  }
+
+  @Post('run-async')
+  async runAsync(@Body() body: any) {
+    let parsed: TinyfishRunRequest
+    try {
+      parsed = TinyfishRunSchema.parse(body)
+    } catch (e: any) {
+      throw new BadRequestException({ error: 'Invalid input', details: e?.issues || e?.message })
+    }
+
+    try {
+      return await runTinyfishAsync(parsed)
+    } catch (e: any) {
+      const details = e?.message || String(e)
+      const missingKey = String(details).includes('Missing TinyFish API key')
+      throw new ServiceUnavailableException({
+        error: missingKey ? 'TinyFish API key is not configured on backend' : 'TinyFish is unavailable',
+        details,
+      })
+    }
+  }
+
+  @Post('run-batch')
+  async runBatch(@Body() body: any) {
+    let parsed: { runs: TinyfishRunRequest[] }
+    try {
+      parsed = TinyfishRunBatchSchema.parse(body)
+    } catch (e: any) {
+      throw new BadRequestException({ error: 'Invalid input', details: e?.issues || e?.message })
+    }
+
+    try {
+      return await runTinyfishBatch(parsed.runs)
+    } catch (e: any) {
+      const details = e?.message || String(e)
+      const missingKey = String(details).includes('Missing TinyFish API key')
+      throw new ServiceUnavailableException({
+        error: missingKey ? 'TinyFish API key is not configured on backend' : 'TinyFish is unavailable',
+        details,
+      })
+    }
+  }
+
+  @Get('runs/:runId')
+  async getRun(@Param('runId') runId: string) {
+    const id = String(runId || '').trim()
+    if (!id) throw new BadRequestException({ error: 'runId is required' })
+
+    try {
+      return await getTinyfishRunById(id)
     } catch (e: any) {
       const details = e?.message || String(e)
       const missingKey = String(details).includes('Missing TinyFish API key')

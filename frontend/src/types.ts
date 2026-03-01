@@ -27,6 +27,26 @@ export interface TinyfishSseEvent {
   data?: any
 }
 
+export interface TinyfishAsyncRunResponse {
+  run_id: string | null
+  error?: any
+}
+
+export interface TinyfishBatchRunResponse {
+  run_ids: string[] | null
+  error?: any
+}
+
+export interface TinyfishRunStatusResponse {
+  run_id: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | string
+  result?: any
+  error?: any
+  streaming_url?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+}
+
 export interface AuthUser {
   userId: string
   email: string

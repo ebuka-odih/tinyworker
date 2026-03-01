@@ -808,7 +808,11 @@ export function ChatView({
       await wait(420)
       if (!stillActive()) return
 
-      appendExecutionTimeline(sessionId, `Scanning ${location} job boards and public listings`, { stage: 'scanning' })
+      appendExecutionTimeline(
+        sessionId,
+        `Launching async scans across LinkedIn, Google Jobs, and Indeed for ${location}`,
+        { stage: 'scanning' },
+      )
 
       const results = await tinyfishService.searchJobsLinkedIn(query, criteria)
       if (!stillActive()) return

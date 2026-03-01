@@ -70,6 +70,9 @@ npm run start:dev
 - `GET /api/intent`
 - `PATCH /api/intent`
 - `POST /api/tinyfish/run`
+- `POST /api/tinyfish/run-async`
+- `POST /api/tinyfish/run-batch`
+- `GET /api/tinyfish/runs/:runId`
 - `GET /api/opportunities`
 - `POST /api/opportunities/import`
 - `GET /api/applications`

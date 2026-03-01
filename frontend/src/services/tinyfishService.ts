@@ -1,4 +1,10 @@
-import { TinyfishRunRequest, TinyfishSseEvent, Opportunity } from '../types'
+import {
+  TinyfishBatchRunResponse,
+  TinyfishRunRequest,
+  TinyfishRunStatusResponse,
+  TinyfishSseEvent,
+  Opportunity,
+} from '../types'
 
 type JobSearchCriteria = Record<string, string>
 type ConfidenceLevel = 'high' | 'medium' | 'low'
@@ -8,12 +14,28 @@ const DEFAULT_JOB_SOURCES =
   'LinkedIn Jobs, Indeed, Jobberman, MyJobMag, Djinni (Tech Jobs), Company Career Pages'
 const DIRECT_TINYFISH_BACKEND = 'https://tinyworker-production.up.railway.app'
 const TINYFISH_PROXY_TIMEOUT_MS = 1000 * 60 * 7
+const MULTI_SOURCE_RUN_TIMEOUT_MS = 1000 * 60 * 12
+const SHORT_TASK_POLL_MS = 2500
+const MEDIUM_TASK_POLL_MS = 7500
+const LONG_TASK_POLL_MS = 30000
 
-function tinyfishRunEndpoint(): string {
-  if (typeof window === 'undefined') return '/api/tinyfish/run'
+function tinyfishApiBase(): string {
+  if (typeof window === 'undefined') return '/api/tinyfish'
   const host = window.location.hostname
   const isVercelHost = host.endsWith('vercel.app')
-  return isVercelHost ? `${DIRECT_TINYFISH_BACKEND}/api/tinyfish/run` : '/api/tinyfish/run'
+  return isVercelHost ? `${DIRECT_TINYFISH_BACKEND}/api/tinyfish` : '/api/tinyfish'
+}
+
+function tinyfishRunEndpoint(): string {
+  return `${tinyfishApiBase()}/run`
+}
+
+function tinyfishRunBatchEndpoint(): string {
+  return `${tinyfishApiBase()}/run-batch`
+}
+
+function tinyfishRunByIdEndpoint(runId: string): string {
+  return `${tinyfishApiBase()}/runs/${encodeURIComponent(runId)}`
 }
 
 function toNumberOrUndefined(value: unknown): number | undefined {
@@ -367,7 +389,20 @@ function buildLinkedinUrl(query: string, criteria: JobSearchCriteria): string {
   return `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(keywords)}&location=${encodeURIComponent(location)}`
 }
 
-function buildJobGoal(query: string, criteria: JobSearchCriteria, maxResults: number): string {
+function buildGoogleJobsUrl(query: string, criteria: JobSearchCriteria): string {
+  const keywords = query || textFromCriteria(criteria, 'job_title', 'Software Engineer')
+  const location = textFromCriteria(criteria, 'job_location', 'Remote', ['any', 'skip', 'global'])
+  const googleQuery = `${keywords} ${location} jobs`
+  return `https://www.google.com/search?ibp=htl;jobs&q=${encodeURIComponent(googleQuery)}`
+}
+
+function buildIndeedUrl(query: string, criteria: JobSearchCriteria): string {
+  const keywords = query || textFromCriteria(criteria, 'job_title', 'Software Engineer')
+  const location = textFromCriteria(criteria, 'job_location', 'Remote', ['any', 'skip', 'global'])
+  return `https://www.indeed.com/jobs?q=${encodeURIComponent(keywords)}&l=${encodeURIComponent(location)}`
+}
+
+function buildJobGoal(query: string, criteria: JobSearchCriteria, maxResults: number, sourceName: string): string {
   const roleLevel = textFromCriteria(criteria, 'job_level', 'Any')
   const roleKeywords = textFromCriteria(criteria, 'job_title', query || 'Any')
   const focus = textFromCriteria(criteria, 'job_focus', 'Any')
@@ -408,6 +443,7 @@ function buildJobGoal(query: string, criteria: JobSearchCriteria, maxResults: nu
 
   return [
     'You are finding job opportunities from trusted public job boards and official company career pages.',
+    `Primary source for this run: ${sourceName}.`,
     'Prefer sources like LinkedIn Jobs, Indeed, Jobberman, MyJobMag, Djinni (Tech Jobs), and company career pages.',
     'Prefer official application links and avoid duplicates.',
     'Prioritize results that best match selected criteria: role keywords, industry, location, work mode, skills, visa preference, salary band, and company type.',
@@ -431,6 +467,34 @@ function buildJobGoal(query: string, criteria: JobSearchCriteria, maxResults: nu
     'Return strict JSON only using this shape:',
     JSON.stringify(outputShape),
   ].join('\n')
+}
+
+function dedupeOpportunities(items: Opportunity[]): Opportunity[] {
+  const seen = new Set<string>()
+  const output: Opportunity[] = []
+
+  for (const row of items) {
+    const key = [
+      normalizeToken(row.title),
+      normalizeToken(row.organization),
+      normalizeToken(row.link || row.sourceUrl || ''),
+    ].join('::')
+    if (seen.has(key)) continue
+    seen.add(key)
+    output.push(row)
+  }
+
+  return output
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function pollingIntervalForElapsed(elapsedMs: number): number {
+  if (elapsedMs < 60_000) return SHORT_TASK_POLL_MS
+  if (elapsedMs < 5 * 60_000) return MEDIUM_TASK_POLL_MS
+  return LONG_TASK_POLL_MS
 }
 
 export const tinyfishService = {
@@ -467,31 +531,160 @@ export const tinyfishService = {
     }
   },
 
+  async runBatch(runs: TinyfishRunRequest[]): Promise<TinyfishBatchRunResponse> {
+    const token = localStorage.getItem('tinyworker.access_token') || ''
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), TINYFISH_PROXY_TIMEOUT_MS)
+    try {
+      const res = await fetch(tinyfishRunBatchEndpoint(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ runs }),
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(
+          `TinyFish batch proxy failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`,
+        )
+      }
+
+      return (await res.json()) as TinyfishBatchRunResponse
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        throw new Error(`TinyFish batch start timed out after ${Math.round(TINYFISH_PROXY_TIMEOUT_MS / 1000)}s`)
+      }
+      throw e
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  },
+
+  async getRunById(runId: string): Promise<TinyfishRunStatusResponse> {
+    const token = localStorage.getItem('tinyworker.access_token') || ''
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), TINYFISH_PROXY_TIMEOUT_MS)
+    try {
+      const res = await fetch(tinyfishRunByIdEndpoint(runId), {
+        method: 'GET',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(
+          `TinyFish run status failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`,
+        )
+      }
+
+      return (await res.json()) as TinyfishRunStatusResponse
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        throw new Error(`TinyFish run status timed out after ${Math.round(TINYFISH_PROXY_TIMEOUT_MS / 1000)}s`)
+      }
+      throw e
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  },
+
+  async waitForRunCompletion(runId: string): Promise<TinyfishRunStatusResponse> {
+    const startedAt = Date.now()
+    while (true) {
+      const run = await this.getRunById(runId)
+      const status = String(run.status || '').toUpperCase()
+
+      if (status === 'COMPLETED' || status === 'FAILED' || status === 'CANCELLED') {
+        return run
+      }
+
+      const elapsed = Date.now() - startedAt
+      if (elapsed >= MULTI_SOURCE_RUN_TIMEOUT_MS) {
+        throw new Error(
+          `TinyFish run ${runId} timed out after ${Math.round(MULTI_SOURCE_RUN_TIMEOUT_MS / 1000)}s`,
+        )
+      }
+
+      await wait(pollingIntervalForElapsed(elapsed))
+    }
+  },
+
+  async searchJobsMultiSource(query: string, criteria: JobSearchCriteria = {}): Promise<Opportunity[]> {
+    const runs: TinyfishRunRequest[] = [
+      {
+        url: buildLinkedinUrl(query, criteria),
+        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'LinkedIn Jobs'),
+        browser_profile: 'stealth',
+        proxy_config: { enabled: false },
+        feature_flags: { enable_agent_memory: false },
+        api_integration: 'tinyfinder-ui',
+      },
+      {
+        url: buildGoogleJobsUrl(query, criteria),
+        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'Google Jobs'),
+        browser_profile: 'stealth',
+        proxy_config: { enabled: false },
+        feature_flags: { enable_agent_memory: false },
+        api_integration: 'tinyfinder-ui',
+      },
+      {
+        url: buildIndeedUrl(query, criteria),
+        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'Indeed'),
+        browser_profile: 'stealth',
+        proxy_config: { enabled: false },
+        feature_flags: { enable_agent_memory: false },
+        api_integration: 'tinyfinder-ui',
+      },
+    ]
+
+    const batch = await this.runBatch(runs)
+    const runIds = Array.isArray(batch?.run_ids) ? batch.run_ids.filter(Boolean) : []
+    if (!runIds.length) {
+      throw new Error('TinyFish did not return run IDs for async batch search.')
+    }
+
+    const settled = await Promise.allSettled(runIds.map((runId) => this.waitForRunCompletion(runId)))
+
+    const completedPayloads: unknown[] = []
+    const failedReasons: string[] = []
+    for (const item of settled) {
+      if (item.status === 'rejected') {
+        failedReasons.push(item.reason?.message || String(item.reason || 'Unknown async error'))
+        continue
+      }
+
+      const run = item.value
+      const status = String(run.status || '').toUpperCase()
+      if (status === 'COMPLETED') {
+        completedPayloads.push(run.result)
+      } else if (status === 'FAILED') {
+        const reason = run.error?.message || run.error?.details || 'Unknown run error'
+        failedReasons.push(String(reason))
+      } else if (status === 'CANCELLED') {
+        failedReasons.push(`Run ${run.run_id} was cancelled`)
+      }
+    }
+
+    if (!completedPayloads.length) {
+      const detail = failedReasons.length ? ` Details: ${failedReasons.slice(0, 3).join(' | ')}` : ''
+      throw new Error(`TinyFish multi-source search returned no completed runs.${detail}`)
+    }
+
+    const mergedRecords = completedPayloads.flatMap((payload) => collectJobRecords(payload))
+    const normalized = normalizeJobs(mergedRecords)
+    const opportunities = toOpportunities(normalized.slice(0, DEFAULT_JOB_RESULTS_LIMIT * 3), 'job')
+    const deduped = dedupeOpportunities(opportunities)
+    return deduped.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0)).slice(0, DEFAULT_JOB_RESULTS_LIMIT)
+  },
+
   async searchJobsLinkedIn(query: string, criteria: JobSearchCriteria = {}): Promise<Opportunity[]> {
-    const url = buildLinkedinUrl(query, criteria)
-    const goal = buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT)
-
-    const evt = await this.run({
-      url,
-      goal,
-      browser_profile: 'stealth',
-      proxy_config: { enabled: false },
-      feature_flags: { enable_agent_memory: false },
-      api_integration: 'tinyfinder-ui',
-    })
-
-    const rj: any =
-      evt?.resultJson ??
-      (evt as any)?.result_json ??
-      evt?.result ??
-      evt?.data?.resultJson ??
-      evt?.data?.result_json ??
-      evt?.data?.result ??
-      {}
-    if (rj?.blocked) return []
-    const records = collectJobRecords(rj)
-    const normalized = normalizeJobs(records)
-    const opportunities = toOpportunities(normalized.slice(0, DEFAULT_JOB_RESULTS_LIMIT), 'job')
-    return opportunities.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0))
+    return await this.searchJobsMultiSource(query, criteria)
   },
 }
