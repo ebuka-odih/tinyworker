@@ -1,12 +1,13 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
-  Bell,
+  Activity,
   CheckCircle2,
   Edit3,
   ExternalLink,
   FileText,
   Linkedin,
-  ListChecks,
+  PauseCircle,
+  PlayCircle,
   Plus,
   Search,
   Sparkles,
@@ -14,11 +15,12 @@ import {
 } from 'lucide-react'
 import { motion } from 'motion/react'
 
-import { Application, AuthUser, CVData, CandidateProfile, Document, Opportunity } from '../../../types'
+import { Application, AuthUser, CVData, CandidateIntent, CandidateProfile, Document, Opportunity } from '../../../types'
 import { Badge, Button, Card, Modal } from '../AppPrimitives'
 
 export function DashboardView({
   authUser,
+  candidateIntent,
   cvs,
   opportunities,
   applications,
@@ -31,11 +33,13 @@ export function DashboardView({
   onOpenBuildResume,
   onExtractProfile,
   onOpenGuidedQuestions,
+  onContinueSearch,
   onCreateApplication,
   onCreateDocument,
   onNavigateProfileReview,
 }: {
   authUser: AuthUser | null
+  candidateIntent: CandidateIntent | null
   cvs: CVData[]
   opportunities: Opportunity[]
   applications: Application[]
@@ -48,6 +52,7 @@ export function DashboardView({
   onOpenBuildResume: () => void
   onExtractProfile: (cvId: string) => Promise<void>
   onOpenGuidedQuestions: () => void
+  onContinueSearch: () => void
   onCreateApplication: (opportunityId: string, status?: Application['status']) => Promise<void>
   onCreateDocument: (doc: Pick<Document, 'type' | 'title' | 'content' | 'opportunityId'>) => Promise<void>
   onNavigateProfileReview: () => void
@@ -59,8 +64,53 @@ export function DashboardView({
   const [targetTone, setTargetTone] = useState('Professional')
   const [isRevamping, setIsRevamping] = useState(false)
   const [revampResult, setRevampResult] = useState<string | null>(null)
+  const [isSearchPaused, setIsSearchPaused] = useState(false)
+  const [activeActivityIndex, setActiveActivityIndex] = useState(0)
   const latestProfile = profiles[0]
   const cvFileInputRef = React.useRef<HTMLInputElement>(null)
+
+  const primaryRole = candidateIntent?.targetRoles?.[0] || latestProfile?.titleHeadline || 'Backend Engineer'
+  const primaryLocation = candidateIntent?.targetLocations?.[0] || 'Germany'
+
+  const focusTags = useMemo(() => {
+    const tags = new Set<string>()
+    for (const mode of candidateIntent?.workModes || []) tags.add(mode)
+    for (const industry of candidateIntent?.industries || []) tags.add(industry)
+    for (const constraint of candidateIntent?.constraints || []) tags.add(constraint)
+    if (candidateIntent?.visaRequired) tags.add('visa-friendly')
+    if (tags.size === 0) {
+      tags.add('backend')
+      tags.add('visa-friendly')
+      tags.add('growth-stage')
+    }
+    return Array.from(tags).slice(0, 4)
+  }, [candidateIntent?.constraints, candidateIntent?.industries, candidateIntent?.visaRequired, candidateIntent?.workModes])
+
+  const activityItems = useMemo(
+    () => [
+      `Scanning ${primaryRole.toLowerCase()} roles in ${primaryLocation}`,
+      'Comparing your CV against role requirements',
+      candidateIntent?.visaRequired ? 'Tracking visa-friendly companies and sponsors' : 'Tracking best-fit companies',
+      'Refreshing your shortlist as new postings appear',
+    ],
+    [candidateIntent?.visaRequired, primaryLocation, primaryRole],
+  )
+
+  useEffect(() => {
+    if (isSearchPaused) return
+    const timer = window.setInterval(() => {
+      setActiveActivityIndex((current) => (current + 1) % activityItems.length)
+    }, 2600)
+
+    return () => window.clearInterval(timer)
+  }, [activityItems.length, isSearchPaused])
+
+  const fitLabel = (matchScore?: number) => {
+    if (typeof matchScore !== 'number') return 'Potential fit'
+    if (matchScore >= 80) return 'Strong fit'
+    if (matchScore >= 60) return 'Good fit'
+    return 'Possible fit'
+  }
 
   const handleRevamp = async () => {
     if (!targetRole) return
@@ -90,49 +140,109 @@ export function DashboardView({
 
   return (
     <div className="p-4 space-y-6 pb-24">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Dashboard</h2>
-          <p className="text-sm text-slate-500">Welcome back, {authUser?.email?.split('@')[0] || 'there'}</p>
+          <h2 className="text-2xl font-bold text-slate-900">Opportunity Agent</h2>
+          <p className="text-sm text-slate-500">Welcome back, {authUser?.email?.split('@')[0] || 'there'}. Your search runs here.</p>
         </div>
-        <button className="relative p-2 bg-white border border-slate-200 rounded-xl text-slate-600">
-          <Bell size={20} />
-          <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white" />
-        </button>
       </header>
 
-      <Card className="bg-slate-900 text-white border-none shadow-xl shadow-slate-200">
-        <div className="flex justify-between items-start mb-4">
+      <Card className="bg-white border-slate-200">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Current Goal</div>
-            <div className="text-lg font-bold">Software Engineer in Germany</div>
+            <div className="text-slate-500 text-[11px] font-semibold uppercase tracking-wider mb-1">Your Current Goal</div>
+            <div className="text-lg font-bold text-slate-900">{primaryRole}</div>
+            <div className="text-sm text-slate-500">{primaryLocation}</div>
           </div>
-          <Button variant="ghost" className="text-white hover:bg-white/10 p-1">
-            <Edit3 size={16} />
-          </Button>
+          <Badge color={isSearchPaused ? 'amber' : 'emerald'}>{isSearchPaused ? 'Paused' : 'Active'}</Badge>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white/10 rounded-xl p-3 border border-white/5">
-            <div className="text-slate-400 text-[10px] uppercase font-bold">CV Score</div>
-            <div className="text-xl font-bold">85/100</div>
-          </div>
-          <div className="bg-white/10 rounded-xl p-3 border border-white/5">
-            <div className="text-slate-400 text-[10px] uppercase font-bold">Matches</div>
-            <div className="text-xl font-bold">{opportunities.length}</div>
-          </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {focusTags.map((tag) => (
+            <Badge key={tag} color="slate">
+              {tag}
+            </Badge>
+          ))}
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Button variant="outline" icon={Edit3} onClick={onOpenGuidedQuestions}>
+            Refine goal
+          </Button>
+          <Button variant="ghost" icon={isSearchPaused ? PlayCircle : PauseCircle} onClick={() => setIsSearchPaused((v) => !v)}>
+            {isSearchPaused ? 'Resume search' : 'Pause search'}
+          </Button>
         </div>
       </Card>
 
-      <div className="grid grid-cols-2 gap-4">
-        <button
-          onClick={() => cvFileInputRef.current?.click()}
-          className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-slate-400 transition-colors group"
-        >
-          <div className="w-10 h-10 bg-slate-100 text-slate-900 rounded-full flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-colors">
-            <Upload size={20} />
+      <Card className="bg-white border-slate-200">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center">
+            <Activity size={16} />
           </div>
-          <span className="text-xs font-bold text-slate-700">{isLoading ? 'Uploading…' : 'Upload CV'}</span>
-        </button>
+          <div>
+            <div className="text-sm font-semibold text-slate-800">Agent activity</div>
+            <div className="text-xs text-slate-500">Live search operations</div>
+          </div>
+        </div>
+        <div className="space-y-2.5">
+          {activityItems.map((item, index) => {
+            const isActive = !isSearchPaused && index === activeActivityIndex
+            return (
+              <div
+                key={item}
+                className={`flex items-start gap-3 rounded-xl border px-3 py-2 ${
+                  isActive ? 'border-slate-300 bg-slate-50' : 'border-slate-100 bg-white'
+                }`}
+              >
+                <motion.span
+                  animate={isActive ? { opacity: [0.4, 1, 0.4] } : { opacity: 0.5 }}
+                  transition={isActive ? { duration: 1.2, repeat: Infinity } : { duration: 0.2 }}
+                  className={`mt-1.5 h-2 w-2 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                />
+                <span className="text-sm text-slate-700">{item}</span>
+              </div>
+            )
+          })}
+        </div>
+      </Card>
+
+      <Card className="bg-white border-slate-200">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-base font-semibold text-slate-900">Continue with your current search intent</div>
+              <div className="text-sm text-slate-500">Keep the agent focused while you adjust supporting inputs only when needed.</div>
+            </div>
+            <Button onClick={onContinueSearch} icon={Search} className="md:min-w-[180px]">
+              Continue Search
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <button
+              type="button"
+              onClick={() => cvFileInputRef.current?.click()}
+              className="inline-flex items-center gap-2 text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              <Upload size={14} />
+              <span>{isLoading ? 'Uploading…' : 'Upload CV'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenBuildResume}
+              className="inline-flex items-center gap-2 text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              <Linkedin size={14} />
+              <span>Import LinkedIn</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenGuidedQuestions}
+              className="inline-flex items-center gap-2 text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              <Edit3 size={14} />
+              <span>Adjust preferences</span>
+            </button>
+          </div>
+        </div>
         <input
           ref={cvFileInputRef}
           type="file"
@@ -144,42 +254,6 @@ export function DashboardView({
             e.currentTarget.value = ''
           }}
         />
-        <button className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-emerald-200 transition-colors group">
-          <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-            <Search size={20} />
-          </div>
-          <span className="text-xs font-bold text-slate-700">Find Jobs</span>
-        </button>
-      </div>
-
-      <Card className="p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 bg-sky-50 text-sky-600 rounded-lg flex items-center justify-center">
-            <Linkedin size={16} />
-          </div>
-          <div className="text-sm font-bold text-slate-800">Build from LinkedIn profile</div>
-        </div>
-        <div className="text-xs text-slate-500 mb-3">
-          Open the guided flow with progress updates while your resume is being built.
-        </div>
-        <Button onClick={onOpenBuildResume} icon={Linkedin}>
-          Build Resume
-        </Button>
-      </Card>
-
-      <Card className="p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
-            <ListChecks size={16} />
-          </div>
-          <div className="text-sm font-bold text-slate-800">Guided Question Flow</div>
-        </div>
-        <div className="text-xs text-slate-500 mb-3">
-          Define your intent with a step-by-step wizard so matching and ranking can use durable preferences.
-        </div>
-        <Button onClick={onOpenGuidedQuestions} variant="outline" icon={ListChecks}>
-          Open Guided Questions
-        </Button>
       </Card>
 
       {cvError ? (
@@ -249,7 +323,7 @@ export function DashboardView({
                     <div className="font-bold text-slate-800">{job.title}</div>
                     <div className="text-sm text-slate-500">{job.organization} • {job.location}</div>
                   </div>
-                  <Badge color="slate">{job.matchScore ? `${Math.round(job.matchScore)}%` : 'Saved'} Match</Badge>
+                  <Badge color="slate">{fitLabel(job.matchScore)}</Badge>
                 </div>
                 <div className="flex gap-2 mt-4">
                   <Button
@@ -420,7 +494,7 @@ export function DashboardView({
                       <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">ATS Optimized • {targetTone} Tone</div>
                     </div>
                   </div>
-                  <Badge color="emerald">+15% Score</Badge>
+                  <Badge color="emerald">Optimized draft</Badge>
                 </div>
 
                 <motion.div

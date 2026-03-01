@@ -110,6 +110,7 @@ export const Badge = ({
 }: {
   children: React.ReactNode
   color?: string
+  key?: React.Key
 }) => {
   const variant = (() => {
     if (color === 'indigo') return 'default'

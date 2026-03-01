@@ -622,6 +622,7 @@ export default function App() {
                   <ProtectedRoute>
                     <DashboardView
                       authUser={authUser}
+                      candidateIntent={candidateIntent}
                       cvs={cvs}
                       opportunities={opportunities}
                       applications={applications}
@@ -633,6 +634,7 @@ export default function App() {
                       onUploadCv={uploadCv}
                       onOpenBuildResume={() => navigate('/build-resume')}
                       onOpenGuidedQuestions={() => navigate('/guided-questions')}
+                      onContinueSearch={() => navigate('/chat')}
                       onExtractProfile={extractProfileFromCv}
                       onCreateApplication={createApplication}
                       onCreateDocument={createDocument}
@@ -682,6 +684,7 @@ export default function App() {
                       intent={candidateIntent}
                       intentError={intentError}
                       isSavingIntent={isSavingIntent}
+                      hasCv={cvs.length > 0}
                       onSaveIntent={saveCandidateIntent}
                       onGoDashboard={() => navigate('/dashboard')}
                     />

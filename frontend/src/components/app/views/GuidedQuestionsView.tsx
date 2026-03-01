@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, Compass, ShieldAlert, Target, Wallet } from 'lucide-react'
+import { Briefcase, CheckCircle2, Compass, MapPin, MessageSquare, ShieldAlert, Target, Wallet } from 'lucide-react'
 
 import { CandidateIntent } from '../../../types'
 import { Badge, Button, Card } from '../AppPrimitives'
@@ -15,6 +15,14 @@ function toCommaList(items: string[] | null | undefined): string {
   return Array.isArray(items) ? items.join(', ') : ''
 }
 
+function appendCommaItem(raw: string, item: string): string {
+  const values = new Set(parseCommaList(raw).map((entry) => entry.toLowerCase()))
+  if (values.has(item.toLowerCase())) return raw
+  const clean = parseCommaList(raw)
+  clean.push(item)
+  return clean.join(', ')
+}
+
 const GOAL_OPTIONS: Array<NonNullable<CandidateIntent['goal']>> = ['job', 'scholarship', 'visa', 'mixed']
 const WORK_MODE_OPTIONS: Array<'remote' | 'hybrid' | 'onsite'> = ['remote', 'hybrid', 'onsite']
 
@@ -22,21 +30,47 @@ export function GuidedQuestionsView({
   intent,
   intentError,
   isSavingIntent,
+  hasCv,
   onSaveIntent,
   onGoDashboard,
 }: {
   intent: CandidateIntent | null
   intentError: string | null
   isSavingIntent: boolean
+  hasCv: boolean
   onSaveIntent: (payload: Partial<CandidateIntent>) => Promise<void>
   onGoDashboard: () => void
 }) {
   const steps = useMemo(
     () => [
-      { key: 'goal', title: 'Define Goal', icon: Target, description: 'Choose your main outcome for this search cycle.' },
-      { key: 'focus', title: 'Role Focus', icon: Compass, description: 'Set role and location preferences used in matching.' },
-      { key: 'preferences', title: 'Preferences', icon: Wallet, description: 'Capture work mode, compensation, and timeline.' },
-      { key: 'constraints', title: 'Constraints', icon: ShieldAlert, description: 'Set hard constraints and extra notes.' },
+      {
+        key: 'goal',
+        title: 'Outcome Focus',
+        icon: Target,
+        prompt: 'What should I optimize for right now?',
+        description: 'Choose the outcome this search cycle should prioritize.',
+      },
+      {
+        key: 'focus',
+        title: 'Role And Location',
+        icon: Compass,
+        prompt: 'Where should I look and for which role?',
+        description: 'Tell me the role and locations so I can keep retrieval focused.',
+      },
+      {
+        key: 'preferences',
+        title: 'Working Preferences',
+        icon: Wallet,
+        prompt: 'What conditions should I respect?',
+        description: 'Capture work mode, compensation, and industry preferences.',
+      },
+      {
+        key: 'constraints',
+        title: 'Constraints',
+        icon: ShieldAlert,
+        prompt: 'Any hard limits before I continue searching?',
+        description: 'Add visa needs, constraints, and final notes for ranking decisions.',
+      },
     ],
     [],
   )
@@ -73,7 +107,7 @@ export function GuidedQuestionsView({
     else setVisaRequired('unknown')
     setConstraints(toCommaList(intent.constraints))
     setNotes(intent.notes || '')
-  }, [intent?.id])
+  }, [intent])
 
   const toggleWorkMode = (mode: 'remote' | 'hybrid' | 'onsite') => {
     setWorkModes((prev) => (prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]))
@@ -129,7 +163,7 @@ export function GuidedQuestionsView({
 
     try {
       await onSaveIntent({ ...buildPayload(), status })
-      setSaveMessage(status === 'ready' ? 'Guided profile marked ready.' : 'Draft saved.')
+      setSaveMessage(status === 'ready' ? 'Profile marked ready for search.' : 'Context saved.')
       return true
     } catch (e: any) {
       setLocalError(e?.message || 'Failed to save guided profile')
@@ -156,257 +190,370 @@ export function GuidedQuestionsView({
     <div className="p-4 space-y-6 pb-24">
       <header className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Guided Questions</h2>
-          <p className="text-sm text-slate-500">Phase 2 wizard for capturing candidate intent.</p>
+          <h2 className="text-2xl font-bold text-slate-900">Agent Workspace</h2>
+          <p className="text-sm text-slate-500">Tell me your intent and I will keep search decisions aligned.</p>
         </div>
         <Button variant="outline" onClick={onGoDashboard}>
           Back to Dashboard
         </Button>
       </header>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {steps.map((step, idx) => {
-          const Icon = step.icon
-          const isActive = idx === currentStep
-          const isDone = idx < currentStep
-          return (
-            <Card key={step.key} className={`${isActive ? 'border-slate-900' : 'border-slate-200'}`}>
-              <div className="flex items-center gap-2">
-                <div
-                  className={`w-7 h-7 rounded-full flex items-center justify-center ${
-                    isDone ? 'bg-emerald-100 text-emerald-700' : isActive ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'
-                  }`}
-                >
-                  {isDone ? <CheckCircle2 size={14} /> : <Icon size={14} />}
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+        <div className="space-y-4">
+          <Card className="border-slate-200 bg-white">
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                  <current.icon size={18} />
                 </div>
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-400">Step {idx + 1}</div>
-                  <div className="text-sm font-semibold text-slate-800">{step.title}</div>
+                  <p className="text-sm font-semibold text-slate-900">{current.prompt}</p>
+                  <p className="text-sm text-slate-500">{current.description}</p>
                 </div>
               </div>
-            </Card>
-          )
-        })}
-      </div>
 
-      <Card>
-        <div className="space-y-5">
-          <div>
-            <h3 className="font-bold text-slate-900">{current.title}</h3>
-            <p className="text-sm text-slate-500">{current.description}</p>
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Optional suggestions</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {currentStep === 0 ? (
+                    GOAL_OPTIONS.map((option) => (
+                      <button
+                        type="button"
+                        key={option}
+                        onClick={() => setGoal(option)}
+                        className={`px-3 py-1.5 rounded-full border text-xs font-semibold capitalize transition-colors ${
+                          goal === option
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                        }`}
+                      >
+                        {option}
+                      </button>
+                    ))
+                  ) : null}
+
+                  {currentStep === 1 ? (
+                    <>
+                      {['Backend Engineer', 'Data Engineer', 'ML Engineer'].map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => setTargetRoles((prev) => appendCommaItem(prev, item))}
+                          className="px-3 py-1.5 rounded-full border bg-white text-slate-700 border-slate-200 hover:border-slate-400 text-xs font-semibold"
+                        >
+                          {item}
+                        </button>
+                      ))}
+                      {['Germany', 'Netherlands', 'Remote EU'].map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => setTargetLocations((prev) => appendCommaItem(prev, item))}
+                          className="px-3 py-1.5 rounded-full border bg-white text-slate-700 border-slate-200 hover:border-slate-400 text-xs font-semibold"
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </>
+                  ) : null}
+
+                  {currentStep === 2 ? (
+                    <>
+                      {WORK_MODE_OPTIONS.map((mode) => (
+                        <button
+                          type="button"
+                          key={mode}
+                          onClick={() => toggleWorkMode(mode)}
+                          className={`px-3 py-1.5 rounded-full border text-xs font-semibold capitalize ${
+                            workModes.includes(mode)
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                          }`}
+                        >
+                          {mode}
+                        </button>
+                      ))}
+                      {['Immediate', 'Within 1 month', 'After graduation'].map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => setStartTimeline(item)}
+                          className="px-3 py-1.5 rounded-full border bg-white text-slate-700 border-slate-200 hover:border-slate-400 text-xs font-semibold"
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </>
+                  ) : null}
+
+                  {currentStep === 3 ? (
+                    <>
+                      {['visa-friendly', 'remote interviews only', 'no relocation before June'].map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => setConstraints((prev) => appendCommaItem(prev, item))}
+                          className="px-3 py-1.5 rounded-full border bg-white text-slate-700 border-slate-200 hover:border-slate-400 text-xs font-semibold"
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="border-slate-200 bg-white">
+            <div className="space-y-5">
+              {currentStep === 0 ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {GOAL_OPTIONS.map((option) => (
+                    <button
+                      type="button"
+                      key={option}
+                      onClick={() => setGoal(option)}
+                      className={`p-3 rounded-xl border text-sm font-semibold capitalize transition-colors ${
+                        goal === option
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {currentStep === 1 ? (
+                <div className="space-y-4">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Target Roles (comma-separated)</span>
+                    <input
+                      type="text"
+                      value={targetRoles}
+                      onChange={(e) => setTargetRoles(e.target.value)}
+                      className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                      placeholder="Backend Engineer, Data Engineer"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Target Locations (comma-separated)</span>
+                    <input
+                      type="text"
+                      value={targetLocations}
+                      onChange={(e) => setTargetLocations(e.target.value)}
+                      className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                      placeholder="Berlin, Remote"
+                    />
+                  </label>
+                </div>
+              ) : null}
+
+              {currentStep === 2 ? (
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-700 mb-2">Work Modes</div>
+                    <div className="flex flex-wrap gap-2">
+                      {WORK_MODE_OPTIONS.map((mode) => (
+                        <button
+                          type="button"
+                          key={mode}
+                          onClick={() => toggleWorkMode(mode)}
+                          className={`px-3 py-2 rounded-xl border text-sm font-semibold capitalize ${
+                            workModes.includes(mode)
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                          }`}
+                        >
+                          {mode}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <label>
+                      <span className="text-xs font-semibold text-slate-600">Salary Currency</span>
+                      <input
+                        type="text"
+                        value={salaryCurrency}
+                        onChange={(e) => setSalaryCurrency(e.target.value.toUpperCase())}
+                        className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                        placeholder="EUR"
+                      />
+                    </label>
+                    <label>
+                      <span className="text-xs font-semibold text-slate-600">Min Salary</span>
+                      <input
+                        type="number"
+                        value={salaryMin}
+                        onChange={(e) => setSalaryMin(e.target.value)}
+                        className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                        placeholder="70000"
+                      />
+                    </label>
+                    <label>
+                      <span className="text-xs font-semibold text-slate-600">Max Salary</span>
+                      <input
+                        type="number"
+                        value={salaryMax}
+                        onChange={(e) => setSalaryMax(e.target.value)}
+                        className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                        placeholder="110000"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Start Timeline</span>
+                    <input
+                      type="text"
+                      value={startTimeline}
+                      onChange={(e) => setStartTimeline(e.target.value)}
+                      className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                      placeholder="Immediate, within 1 month, after graduation"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Industries (comma-separated)</span>
+                    <input
+                      type="text"
+                      value={industries}
+                      onChange={(e) => setIndustries(e.target.value)}
+                      className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                      placeholder="FinTech, HealthTech"
+                    />
+                  </label>
+                </div>
+              ) : null}
+
+              {currentStep === 3 ? (
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-700 mb-2">Visa Sponsorship Required?</div>
+                    <div className="flex gap-2">
+                      {[
+                        { key: 'unknown', label: 'Unknown' },
+                        { key: 'yes', label: 'Yes' },
+                        { key: 'no', label: 'No' },
+                      ].map((choice) => (
+                        <button
+                          key={choice.key}
+                          type="button"
+                          onClick={() => setVisaRequired(choice.key as 'unknown' | 'yes' | 'no')}
+                          className={`px-3 py-2 rounded-xl border text-sm font-semibold ${
+                            visaRequired === choice.key
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                          }`}
+                        >
+                          {choice.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Hard Constraints (comma-separated)</span>
+                    <input
+                      type="text"
+                      value={constraints}
+                      onChange={(e) => setConstraints(e.target.value)}
+                      className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                      placeholder="No relocation before June, only remote interviews"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Extra Notes</span>
+                    <textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      className="mt-1 w-full p-3 min-h-[120px] bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                      placeholder="Anything the matching/ranking flow should consider"
+                    />
+                  </label>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Badge color="slate">Goal: {goal || 'unset'}</Badge>
+                    <Badge color="slate">Roles: {parseCommaList(targetRoles).length}</Badge>
+                    <Badge color="slate">Locations: {parseCommaList(targetLocations).length}</Badge>
+                    <Badge color="slate">Modes: {workModes.length}</Badge>
+                    <Badge color="slate">Status: {intent?.status || 'draft'}</Badge>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </Card>
+
+          {localError || intentError ? (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm">{localError || intentError}</div>
+          ) : null}
+          {saveMessage ? (
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">{saveMessage}</div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button
+              variant="outline"
+              disabled={currentStep === 0 || isSavingIntent}
+              onClick={() => setCurrentStep((s) => Math.max(s - 1, 0))}
+            >
+              Back
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" disabled={isSavingIntent} onClick={() => saveIntent('draft')}>
+                {isSavingIntent ? 'Saving...' : 'Save context'}
+              </Button>
+              {!isLastStep ? (
+                <Button disabled={isSavingIntent} onClick={onNext}>
+                  Continue
+                </Button>
+              ) : (
+                <Button disabled={isSavingIntent} onClick={() => saveIntent('ready')}>
+                  {isSavingIntent ? 'Saving...' : 'Mark Ready'}
+                </Button>
+              )}
+            </div>
           </div>
-
-          {currentStep === 0 ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {GOAL_OPTIONS.map((option) => (
-                <button
-                  type="button"
-                  key={option}
-                  onClick={() => setGoal(option)}
-                  className={`p-3 rounded-xl border text-sm font-semibold capitalize transition-colors ${
-                    goal === option
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
-                  }`}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {currentStep === 1 ? (
-            <div className="space-y-4">
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Target Roles (comma-separated)</span>
-                <input
-                  type="text"
-                  value={targetRoles}
-                  onChange={(e) => setTargetRoles(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="Backend Engineer, Data Engineer"
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Target Locations (comma-separated)</span>
-                <input
-                  type="text"
-                  value={targetLocations}
-                  onChange={(e) => setTargetLocations(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="Berlin, Remote"
-                />
-              </label>
-            </div>
-          ) : null}
-
-          {currentStep === 2 ? (
-            <div className="space-y-4">
-              <div>
-                <div className="text-sm font-semibold text-slate-700 mb-2">Work Modes</div>
-                <div className="flex flex-wrap gap-2">
-                  {WORK_MODE_OPTIONS.map((mode) => (
-                    <button
-                      type="button"
-                      key={mode}
-                      onClick={() => toggleWorkMode(mode)}
-                      className={`px-3 py-2 rounded-xl border text-sm font-semibold capitalize ${
-                        workModes.includes(mode)
-                          ? 'bg-slate-900 text-white border-slate-900'
-                          : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-3">
-                <label>
-                  <span className="text-xs font-semibold text-slate-600">Salary Currency</span>
-                  <input
-                    type="text"
-                    value={salaryCurrency}
-                    onChange={(e) => setSalaryCurrency(e.target.value.toUpperCase())}
-                    className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                    placeholder="EUR"
-                  />
-                </label>
-                <label>
-                  <span className="text-xs font-semibold text-slate-600">Min Salary</span>
-                  <input
-                    type="number"
-                    value={salaryMin}
-                    onChange={(e) => setSalaryMin(e.target.value)}
-                    className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                    placeholder="70000"
-                  />
-                </label>
-                <label>
-                  <span className="text-xs font-semibold text-slate-600">Max Salary</span>
-                  <input
-                    type="number"
-                    value={salaryMax}
-                    onChange={(e) => setSalaryMax(e.target.value)}
-                    className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                    placeholder="110000"
-                  />
-                </label>
-              </div>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Start Timeline</span>
-                <input
-                  type="text"
-                  value={startTimeline}
-                  onChange={(e) => setStartTimeline(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="Immediate, within 1 month, after graduation"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Industries (comma-separated)</span>
-                <input
-                  type="text"
-                  value={industries}
-                  onChange={(e) => setIndustries(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="FinTech, HealthTech"
-                />
-              </label>
-            </div>
-          ) : null}
-
-          {currentStep === 3 ? (
-            <div className="space-y-4">
-              <div>
-                <div className="text-sm font-semibold text-slate-700 mb-2">Visa Sponsorship Required?</div>
-                <div className="flex gap-2">
-                  {[
-                    { key: 'unknown', label: 'Unknown' },
-                    { key: 'yes', label: 'Yes' },
-                    { key: 'no', label: 'No' },
-                  ].map((choice) => (
-                    <button
-                      key={choice.key}
-                      type="button"
-                      onClick={() => setVisaRequired(choice.key as 'unknown' | 'yes' | 'no')}
-                      className={`px-3 py-2 rounded-xl border text-sm font-semibold ${
-                        visaRequired === choice.key
-                          ? 'bg-slate-900 text-white border-slate-900'
-                          : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
-                      }`}
-                    >
-                      {choice.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Hard Constraints (comma-separated)</span>
-                <input
-                  type="text"
-                  value={constraints}
-                  onChange={(e) => setConstraints(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="No relocation before June, only remote interviews"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Extra Notes</span>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="mt-1 w-full p-3 min-h-[120px] bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="Anything the matching/ranking flow should consider"
-                />
-              </label>
-
-              <div className="flex flex-wrap gap-2">
-                <Badge color="slate">Goal: {goal || 'unset'}</Badge>
-                <Badge color="slate">Roles: {parseCommaList(targetRoles).length}</Badge>
-                <Badge color="slate">Locations: {parseCommaList(targetLocations).length}</Badge>
-                <Badge color="slate">Modes: {workModes.length}</Badge>
-                <Badge color="slate">Status: {intent?.status || 'draft'}</Badge>
-              </div>
-            </div>
-          ) : null}
         </div>
-      </Card>
 
-      {localError || intentError ? (
-        <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm">{localError || intentError}</div>
-      ) : null}
-      {saveMessage ? (
-        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">{saveMessage}</div>
-      ) : null}
+        <div className="space-y-4 lg:sticky lg:top-4">
+          <Card className="border-slate-200 bg-white">
+            <div className="space-y-3">
+              <div className="text-sm font-semibold text-slate-900">What I Know About You</div>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                  <div className="inline-flex items-center gap-2 text-slate-500"><Briefcase size={14} /> Role</div>
+                  <div className="font-medium text-slate-800 text-right">{parseCommaList(targetRoles)[0] || 'Not set'}</div>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                  <div className="inline-flex items-center gap-2 text-slate-500"><MapPin size={14} /> Location</div>
+                  <div className="font-medium text-slate-800 text-right">{parseCommaList(targetLocations)[0] || 'Not set'}</div>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                  <div className="inline-flex items-center gap-2 text-slate-500"><Compass size={14} /> Industry</div>
+                  <div className="font-medium text-slate-800 text-right">{parseCommaList(industries)[0] || 'Not set'}</div>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                  <div className="inline-flex items-center gap-2 text-slate-500"><CheckCircle2 size={14} /> CV status</div>
+                  <div className="font-medium text-slate-800 text-right">{hasCv ? 'On file' : 'Not uploaded'}</div>
+                </div>
+              </div>
+            </div>
+          </Card>
 
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-slate-500">Step {currentStep + 1} of {steps.length}</div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            disabled={currentStep === 0 || isSavingIntent}
-            onClick={() => setCurrentStep((s) => Math.max(s - 1, 0))}
-          >
-            Previous
-          </Button>
-          <Button variant="outline" disabled={isSavingIntent} onClick={() => saveIntent('draft')}>
-            {isSavingIntent ? 'Saving...' : 'Save Draft'}
-          </Button>
-          {!isLastStep ? (
-            <Button disabled={isSavingIntent} onClick={onNext}>
-              Next
-            </Button>
-          ) : (
-            <Button disabled={isSavingIntent} onClick={() => saveIntent('ready')}>
-              {isSavingIntent ? 'Saving...' : 'Mark Ready'}
-            </Button>
-          )}
+          <Card className="border-slate-200 bg-white">
+            <div className="flex items-start gap-2">
+              <MessageSquare size={16} className="text-slate-500 mt-0.5" />
+              <p className="text-xs text-slate-600">
+                This memory updates as you save. It is used by the agent when retrieving and ranking opportunities.
+              </p>
+            </div>
+          </Card>
         </div>
       </div>
     </div>
