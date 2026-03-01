@@ -7,6 +7,7 @@ const DEFAULT_JOB_RESULTS_LIMIT = 10
 const DEFAULT_JOB_SOURCES =
   'LinkedIn Jobs, Indeed, Jobberman, MyJobMag, Djinni (Tech Jobs), Company Career Pages'
 const DIRECT_TINYFISH_BACKEND = 'https://tinyworker-production.up.railway.app'
+const TINYFISH_PROXY_TIMEOUT_MS = 1000 * 60 * 7
 
 function tinyfishRunEndpoint(): string {
   if (typeof window === 'undefined') return '/api/tinyfish/run'
@@ -435,23 +436,35 @@ function buildJobGoal(query: string, criteria: JobSearchCriteria, maxResults: nu
 export const tinyfishService = {
   async run(req: TinyfishRunRequest): Promise<TinyfishSseEvent> {
     const token = localStorage.getItem('tinyworker.access_token') || ''
-    const res = await fetch(tinyfishRunEndpoint(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(req),
-    })
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), TINYFISH_PROXY_TIMEOUT_MS)
+    try {
+      const res = await fetch(tinyfishRunEndpoint(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(req),
+        signal: controller.signal,
+      })
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(
-        `TinyFish proxy failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`
-      )
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(
+          `TinyFish proxy failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`
+        )
+      }
+
+      return (await res.json()) as TinyfishSseEvent
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        throw new Error(`TinyFish search timed out after ${Math.round(TINYFISH_PROXY_TIMEOUT_MS / 1000)}s`)
+      }
+      throw e
+    } finally {
+      window.clearTimeout(timeout)
     }
-
-    return (await res.json()) as TinyfishSseEvent
   },
 
   async searchJobsLinkedIn(query: string, criteria: JobSearchCriteria = {}): Promise<Opportunity[]> {
@@ -467,7 +480,14 @@ export const tinyfishService = {
       api_integration: 'tinyfinder-ui',
     })
 
-    const rj: any = evt?.resultJson || {}
+    const rj: any =
+      evt?.resultJson ??
+      (evt as any)?.result_json ??
+      evt?.result ??
+      evt?.data?.resultJson ??
+      evt?.data?.result_json ??
+      evt?.data?.result ??
+      {}
     if (rj?.blocked) return []
     const records = collectJobRecords(rj)
     const normalized = normalizeJobs(records)

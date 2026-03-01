@@ -23,6 +23,8 @@ export interface TinyfishSseEvent {
   status?: 'COMPLETED' | 'FAILED' | 'CANCELLED' | string
   error?: string
   resultJson?: any
+  result?: any
+  data?: any
 }
 
 export interface AuthUser {

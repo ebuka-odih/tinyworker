@@ -440,7 +440,14 @@ Rules:
           browser_profile: attempt.browser_profile,
           proxy_config: buildProxyConfig(attempt.proxy),
         })
-        const normalized = normalizeResultJson(evt?.resultJson)
+        const normalized = normalizeResultJson(
+          evt?.resultJson ??
+          (evt as any)?.result_json ??
+          (evt as any)?.result ??
+          (evt as any)?.data?.resultJson ??
+          (evt as any)?.data?.result_json ??
+          (evt as any)?.data?.result,
+        )
         if (normalized && typeof normalized === 'object') {
           result = normalized
           attemptLabel = attempt.label

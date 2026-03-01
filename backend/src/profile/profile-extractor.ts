@@ -43,7 +43,13 @@ ${trimmed}
   })
 
   // TinyFish often returns JSON as a string. Normalize.
-  const rj: any = evt.resultJson
+  const rj: any =
+    evt?.resultJson ??
+    (evt as any)?.result_json ??
+    (evt as any)?.result ??
+    (evt as any)?.data?.resultJson ??
+    (evt as any)?.data?.result_json ??
+    (evt as any)?.data?.result
   if (typeof rj === 'string') {
     try {
       return JSON.parse(rj)
