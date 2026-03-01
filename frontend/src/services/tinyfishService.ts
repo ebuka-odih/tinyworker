@@ -6,6 +6,14 @@ type ConfidenceLevel = 'high' | 'medium' | 'low'
 const DEFAULT_JOB_RESULTS_LIMIT = 10
 const DEFAULT_JOB_SOURCES =
   'LinkedIn Jobs, Indeed, Jobberman, MyJobMag, Djinni (Tech Jobs), Company Career Pages'
+const DIRECT_TINYFISH_BACKEND = 'https://tinyworker-production.up.railway.app'
+
+function tinyfishRunEndpoint(): string {
+  if (typeof window === 'undefined') return '/api/tinyfish/run'
+  const host = window.location.hostname
+  const isVercelHost = host.endsWith('vercel.app')
+  return isVercelHost ? `${DIRECT_TINYFISH_BACKEND}/api/tinyfish/run` : '/api/tinyfish/run'
+}
 
 function toNumberOrUndefined(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -427,7 +435,7 @@ function buildJobGoal(query: string, criteria: JobSearchCriteria, maxResults: nu
 export const tinyfishService = {
   async run(req: TinyfishRunRequest): Promise<TinyfishSseEvent> {
     const token = localStorage.getItem('tinyworker.access_token') || ''
-    const res = await fetch('/api/tinyfish/run', {
+    const res = await fetch(tinyfishRunEndpoint(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
