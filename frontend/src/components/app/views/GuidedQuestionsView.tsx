@@ -233,8 +233,15 @@ export function GuidedQuestionsView({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Quick suggestions</div>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Target Roles (comma-separated)</span>
+                <input
+                  type="text"
+                  value={targetRoles}
+                  onChange={(e) => setTargetRoles(e.target.value)}
+                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                  placeholder="Backend Engineer, Data Engineer"
+                />
                 <div className="mt-2 flex flex-wrap gap-2">
                   {ROLE_SUGGESTIONS.map((item) => (
                     <button
@@ -246,6 +253,18 @@ export function GuidedQuestionsView({
                       {item}
                     </button>
                   ))}
+                </div>
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Target Locations (comma-separated)</span>
+                <input
+                  type="text"
+                  value={targetLocations}
+                  onChange={(e) => setTargetLocations(e.target.value)}
+                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                  placeholder="Berlin, Remote"
+                />
+                <div className="mt-2 flex flex-wrap gap-2">
                   {LOCATION_SUGGESTIONS.map((item) => (
                     <button
                       key={item}
@@ -257,27 +276,6 @@ export function GuidedQuestionsView({
                     </button>
                   ))}
                 </div>
-              </div>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Target Roles (comma-separated)</span>
-                <input
-                  type="text"
-                  value={targetRoles}
-                  onChange={(e) => setTargetRoles(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="Backend Engineer, Data Engineer"
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Target Locations (comma-separated)</span>
-                <input
-                  type="text"
-                  value={targetLocations}
-                  onChange={(e) => setTargetLocations(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="Berlin, Remote"
-                />
               </label>
             </div>
           </Card>
@@ -314,26 +312,17 @@ export function GuidedQuestionsView({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Industry suggestions</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {INDUSTRY_SUGGESTIONS.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => setIndustries((prev) => appendCommaItem(prev, item))}
-                      className={SUGGESTION_BTN}
-                    >
-                      {item}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <div className="grid md:grid-cols-3 gap-3">
                 <label>
                   <span className="text-xs font-semibold text-slate-600">Salary Currency</span>
-                  <div className="mt-1 flex flex-wrap gap-2">
+                  <input
+                    type="text"
+                    value={salaryCurrency}
+                    onChange={(e) => setSalaryCurrency(e.target.value.toUpperCase())}
+                    className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                    placeholder="EUR"
+                  />
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {CURRENCY_SUGGESTIONS.map((currency) => (
                       <button
                         key={currency}
@@ -349,13 +338,6 @@ export function GuidedQuestionsView({
                       </button>
                     ))}
                   </div>
-                  <input
-                    type="text"
-                    value={salaryCurrency}
-                    onChange={(e) => setSalaryCurrency(e.target.value.toUpperCase())}
-                    className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                    placeholder="EUR"
-                  />
                 </label>
                 <label>
                   <span className="text-xs font-semibold text-slate-600">Min Salary</span>
@@ -403,7 +385,14 @@ export function GuidedQuestionsView({
 
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Start Timeline</span>
-                <div className="mt-1 flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  value={startTimeline}
+                  onChange={(e) => setStartTimeline(e.target.value)}
+                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                  placeholder="Immediate, within 1 month, after graduation"
+                />
+                <div className="mt-2 flex flex-wrap gap-2">
                   {START_TIMELINE_SUGGESTIONS.map((item) => (
                     <button
                       key={item}
@@ -419,13 +408,6 @@ export function GuidedQuestionsView({
                     </button>
                   ))}
                 </div>
-                <input
-                  type="text"
-                  value={startTimeline}
-                  onChange={(e) => setStartTimeline(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="Immediate, within 1 month, after graduation"
-                />
               </label>
 
               <label className="block">
@@ -437,6 +419,18 @@ export function GuidedQuestionsView({
                   className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
                   placeholder="FinTech, HealthTech"
                 />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {INDUSTRY_SUGGESTIONS.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setIndustries((prev) => appendCommaItem(prev, item))}
+                      className={SUGGESTION_BTN}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
               </label>
             </div>
           </Card>
@@ -479,7 +473,14 @@ export function GuidedQuestionsView({
 
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Hard Constraints (comma-separated)</span>
-                <div className="mt-1 flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  value={constraints}
+                  onChange={(e) => setConstraints(e.target.value)}
+                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                  placeholder="No relocation before June, only remote interviews"
+                />
+                <div className="mt-2 flex flex-wrap gap-2">
                   {CONSTRAINT_SUGGESTIONS.map((item) => (
                     <button
                       key={item}
@@ -491,18 +492,17 @@ export function GuidedQuestionsView({
                     </button>
                   ))}
                 </div>
-                <input
-                  type="text"
-                  value={constraints}
-                  onChange={(e) => setConstraints(e.target.value)}
-                  className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="No relocation before June, only remote interviews"
-                />
               </label>
 
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Extra Notes</span>
-                <div className="mt-1 flex flex-wrap gap-2">
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="mt-1 w-full p-3 min-h-[120px] bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
+                  placeholder="Anything the matching/ranking flow should consider"
+                />
+                <div className="mt-2 flex flex-wrap gap-2">
                   {NOTE_SUGGESTIONS.map((item) => (
                     <button
                       key={item}
@@ -514,12 +514,6 @@ export function GuidedQuestionsView({
                     </button>
                   ))}
                 </div>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="mt-1 w-full p-3 min-h-[120px] bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none"
-                  placeholder="Anything the matching/ranking flow should consider"
-                />
               </label>
             </div>
           </Card>
