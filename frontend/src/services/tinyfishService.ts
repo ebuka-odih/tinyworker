@@ -13,7 +13,6 @@ type ConfidenceLevel = 'high' | 'medium' | 'low'
 const DEFAULT_JOB_RESULTS_LIMIT = 10
 const DEFAULT_JOB_SOURCES =
   'LinkedIn Jobs, Indeed, Jobberman, MyJobMag, Djinni (Tech Jobs), Company Career Pages'
-const DIRECT_TINYFISH_BACKEND = 'https://tinyworker-production.up.railway.app'
 const TINYFISH_PROXY_TIMEOUT_MS = 1000 * 60 * 7
 const MULTI_SOURCE_RUN_TIMEOUT_MS = 1000 * 60 * 12
 const SHORT_TASK_POLL_MS = 2500
@@ -21,10 +20,14 @@ const MEDIUM_TASK_POLL_MS = 7500
 const LONG_TASK_POLL_MS = 30000
 
 function tinyfishApiBase(): string {
-  if (typeof window === 'undefined') return '/api/tinyfish'
-  const host = window.location.hostname
-  const isVercelHost = host.endsWith('vercel.app')
-  return isVercelHost ? `${DIRECT_TINYFISH_BACKEND}/api/tinyfish` : '/api/tinyfish'
+  // Default to same-origin API path (works with frontend rewrite/proxy, avoids CORS).
+  // Use explicit env override only when you intentionally want cross-origin direct backend calls.
+  const directFromEnv =
+    typeof import.meta !== 'undefined' ? String((import.meta as any).env?.VITE_TINYFISH_BACKEND_URL || '').trim() : ''
+  if (directFromEnv) {
+    return `${directFromEnv.replace(/\/+$/, '')}/api/tinyfish`
+  }
+  return '/api/tinyfish'
 }
 
 function tinyfishRunEndpoint(): string {
