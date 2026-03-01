@@ -1,4 +1,5 @@
 import {
+  TinyfishAsyncRunResponse,
   TinyfishBatchRunResponse,
   TinyfishRunRequest,
   TinyfishRunStatusResponse,
@@ -32,6 +33,10 @@ function tinyfishRunEndpoint(): string {
 
 function tinyfishRunBatchEndpoint(): string {
   return `${tinyfishApiBase()}/run-batch`
+}
+
+function tinyfishRunAsyncEndpoint(): string {
+  return `${tinyfishApiBase()}/run-async`
 }
 
 function tinyfishRunByIdEndpoint(runId: string): string {
@@ -402,7 +407,13 @@ function buildIndeedUrl(query: string, criteria: JobSearchCriteria): string {
   return `https://www.indeed.com/jobs?q=${encodeURIComponent(keywords)}&l=${encodeURIComponent(location)}`
 }
 
-function buildJobGoal(query: string, criteria: JobSearchCriteria, maxResults: number, sourceName: string): string {
+function buildJobGoal(
+  query: string,
+  criteria: JobSearchCriteria,
+  maxResults: number,
+  sourceName: string,
+  options?: { strictSourceOnly?: boolean },
+): string {
   const roleLevel = textFromCriteria(criteria, 'job_level', 'Any')
   const roleKeywords = textFromCriteria(criteria, 'job_title', query || 'Any')
   const focus = textFromCriteria(criteria, 'job_focus', 'Any')
@@ -444,6 +455,12 @@ function buildJobGoal(query: string, criteria: JobSearchCriteria, maxResults: nu
   return [
     'You are finding job opportunities from trusted public job boards and official company career pages.',
     `Primary source for this run: ${sourceName}.`,
+    ...(options?.strictSourceOnly
+      ? [
+          `For this run, collect jobs from ${sourceName} only.`,
+          'Do not switch this run to another job board.',
+        ]
+      : []),
     'Prefer sources like LinkedIn Jobs, Indeed, Jobberman, MyJobMag, Djinni (Tech Jobs), and company career pages.',
     'Prefer official application links and avoid duplicates.',
     'Prioritize results that best match selected criteria: role keywords, industry, location, work mode, skills, visa preference, salary band, and company type.',
@@ -489,6 +506,20 @@ function dedupeOpportunities(items: Opportunity[]): Opportunity[] {
 
 async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function extractRunPayload(run: TinyfishRunStatusResponse | null | undefined): unknown {
+  if (!run || typeof run !== 'object') return null
+  const anyRun = run as any
+  return (
+    anyRun?.result ??
+    anyRun?.result_json ??
+    anyRun?.resultJson ??
+    anyRun?.data?.result ??
+    anyRun?.data?.result_json ??
+    anyRun?.data?.resultJson ??
+    null
+  )
 }
 
 function pollingIntervalForElapsed(elapsedMs: number): number {
@@ -564,6 +595,39 @@ export const tinyfishService = {
     }
   },
 
+  async runAsync(req: TinyfishRunRequest): Promise<TinyfishAsyncRunResponse> {
+    const token = localStorage.getItem('tinyworker.access_token') || ''
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), TINYFISH_PROXY_TIMEOUT_MS)
+    try {
+      const res = await fetch(tinyfishRunAsyncEndpoint(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(req),
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(
+          `TinyFish async proxy failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`,
+        )
+      }
+
+      return (await res.json()) as TinyfishAsyncRunResponse
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        throw new Error(`TinyFish async start timed out after ${Math.round(TINYFISH_PROXY_TIMEOUT_MS / 1000)}s`)
+      }
+      throw e
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  },
+
   async getRunById(runId: string): Promise<TinyfishRunStatusResponse> {
     const token = localStorage.getItem('tinyworker.access_token') || ''
     const controller = new AbortController()
@@ -597,11 +661,20 @@ export const tinyfishService = {
 
   async waitForRunCompletion(runId: string): Promise<TinyfishRunStatusResponse> {
     const startedAt = Date.now()
+    let completedWithoutPayloadCount = 0
     while (true) {
       const run = await this.getRunById(runId)
       const status = String(run.status || '').toUpperCase()
 
-      if (status === 'COMPLETED' || status === 'FAILED' || status === 'CANCELLED') {
+      if (status === 'COMPLETED') {
+        const payload = extractRunPayload(run)
+        if (payload != null) return run
+        // Some providers expose COMPLETED slightly before result payload is attached.
+        completedWithoutPayloadCount += 1
+        if (completedWithoutPayloadCount >= 6) return run
+      }
+
+      if (status === 'FAILED' || status === 'CANCELLED') {
         return run
       }
 
@@ -620,37 +693,46 @@ export const tinyfishService = {
     const runs: TinyfishRunRequest[] = [
       {
         url: buildLinkedinUrl(query, criteria),
-        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'LinkedIn Jobs'),
+        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'LinkedIn Jobs', { strictSourceOnly: true }),
         browser_profile: 'stealth',
         proxy_config: { enabled: false },
         feature_flags: { enable_agent_memory: false },
-        api_integration: 'tinyfinder-ui',
+        api_integration: 'tinyfinder-ui-linkedin',
       },
       {
         url: buildGoogleJobsUrl(query, criteria),
-        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'Google Jobs'),
+        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'Google Jobs', { strictSourceOnly: true }),
         browser_profile: 'stealth',
         proxy_config: { enabled: false },
         feature_flags: { enable_agent_memory: false },
-        api_integration: 'tinyfinder-ui',
+        api_integration: 'tinyfinder-ui-google-jobs',
       },
       {
         url: buildIndeedUrl(query, criteria),
-        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'Indeed'),
+        goal: buildJobGoal(query, criteria, DEFAULT_JOB_RESULTS_LIMIT, 'Indeed', { strictSourceOnly: true }),
         browser_profile: 'stealth',
         proxy_config: { enabled: false },
         feature_flags: { enable_agent_memory: false },
-        api_integration: 'tinyfinder-ui',
+        api_integration: 'tinyfinder-ui-indeed',
       },
     ]
 
-    const batch = await this.runBatch(runs)
-    const runIds = Array.isArray(batch?.run_ids) ? batch.run_ids.filter(Boolean) : []
+    // Start each source explicitly so sessions are isolated per source.
+    const started = await Promise.allSettled(runs.map((req) => this.runAsync(req)))
+    const runIds = started
+      .flatMap((row) => (row.status === 'fulfilled' ? [String(row.value?.run_id || '').trim()] : []))
+      .filter(Boolean)
+
     if (!runIds.length) {
-      throw new Error('TinyFish did not return run IDs for async batch search.')
+      const startErrors = started
+        .flatMap((row) => (row.status === 'rejected' ? [row.reason?.message || String(row.reason || 'Unknown error')] : []))
+        .slice(0, 3)
+      const detail = startErrors.length ? ` Details: ${startErrors.join(' | ')}` : ''
+      throw new Error(`TinyFish did not return run IDs for async multi-source search.${detail}`)
     }
 
-    const settled = await Promise.allSettled(runIds.map((runId) => this.waitForRunCompletion(runId)))
+    const uniqueRunIds = Array.from(new Set(runIds))
+    const settled = await Promise.allSettled(uniqueRunIds.map((runId) => this.waitForRunCompletion(runId)))
 
     const completedPayloads: unknown[] = []
     const failedReasons: string[] = []
@@ -663,7 +745,9 @@ export const tinyfishService = {
       const run = item.value
       const status = String(run.status || '').toUpperCase()
       if (status === 'COMPLETED') {
-        completedPayloads.push(run.result)
+        const payload = extractRunPayload(run)
+        if (payload != null) completedPayloads.push(payload)
+        else failedReasons.push(`Run ${run.run_id} completed without payload`)
       } else if (status === 'FAILED') {
         const reason = run.error?.message || run.error?.details || 'Unknown run error'
         failedReasons.push(String(reason))
