@@ -25,6 +25,27 @@ function appendCommaItem(raw: string, item: string): string {
 
 const GOAL_OPTIONS: Array<NonNullable<CandidateIntent['goal']>> = ['job', 'scholarship', 'visa', 'mixed']
 const WORK_MODE_OPTIONS: Array<'remote' | 'hybrid' | 'onsite'> = ['remote', 'hybrid', 'onsite']
+const ROLE_SUGGESTIONS = ['Backend Engineer', 'Data Engineer', 'ML Engineer', 'DevOps Engineer', 'Product Manager']
+const LOCATION_SUGGESTIONS = ['Germany', 'Netherlands', 'United Kingdom', 'Canada', 'Remote EU']
+const INDUSTRY_SUGGESTIONS = ['FinTech', 'HealthTech', 'EdTech', 'SaaS', 'AI']
+const CURRENCY_SUGGESTIONS = ['EUR', 'USD', 'GBP', 'CAD', 'AUD']
+const START_TIMELINE_SUGGESTIONS = ['Immediately', 'Within 2 weeks', 'Within 1 month', 'Within 3 months', 'After graduation']
+const CONSTRAINT_SUGGESTIONS = [
+  'Visa sponsorship required',
+  'Remote interviews only',
+  'No relocation before June',
+  'Mid-level roles only',
+  'English-speaking teams',
+]
+const NOTE_SUGGESTIONS = [
+  'Prioritize companies with clear growth paths.',
+  'Focus on roles with strong mentorship.',
+  'Avoid high-travel positions.',
+  'Prefer organizations with international teams.',
+  'Optimize for fastest interview cycle.',
+]
+
+const SUGGESTION_BTN = 'px-3 py-1.5 rounded-full border bg-white text-slate-700 border-slate-200 hover:border-slate-400 text-xs font-semibold'
 
 export function GuidedQuestionsView({
   intent,
@@ -78,6 +99,11 @@ export function GuidedQuestionsView({
 
   const toggleWorkMode = (mode: 'remote' | 'hybrid' | 'onsite') => {
     setWorkModes((prev) => (prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]))
+  }
+
+  const setSalaryRange = (min: number, max: number) => {
+    setSalaryMin(String(min))
+    setSalaryMax(String(max))
   }
 
   const buildPayload = (): Partial<CandidateIntent> => {
@@ -210,22 +236,22 @@ export function GuidedQuestionsView({
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Quick suggestions</div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {['Backend Engineer', 'Data Engineer', 'ML Engineer'].map((item) => (
+                  {ROLE_SUGGESTIONS.map((item) => (
                     <button
                       key={item}
                       type="button"
                       onClick={() => setTargetRoles((prev) => appendCommaItem(prev, item))}
-                      className="px-3 py-1.5 rounded-full border bg-white text-slate-700 border-slate-200 hover:border-slate-400 text-xs font-semibold"
+                      className={SUGGESTION_BTN}
                     >
                       {item}
                     </button>
                   ))}
-                  {['Germany', 'Netherlands', 'Remote EU'].map((item) => (
+                  {LOCATION_SUGGESTIONS.map((item) => (
                     <button
                       key={item}
                       type="button"
                       onClick={() => setTargetLocations((prev) => appendCommaItem(prev, item))}
-                      className="px-3 py-1.5 rounded-full border bg-white text-slate-700 border-slate-200 hover:border-slate-400 text-xs font-semibold"
+                      className={SUGGESTION_BTN}
                     >
                       {item}
                     </button>
@@ -288,9 +314,41 @@ export function GuidedQuestionsView({
                 </div>
               </div>
 
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Industry suggestions</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {INDUSTRY_SUGGESTIONS.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setIndustries((prev) => appendCommaItem(prev, item))}
+                      className={SUGGESTION_BTN}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid md:grid-cols-3 gap-3">
                 <label>
                   <span className="text-xs font-semibold text-slate-600">Salary Currency</span>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {CURRENCY_SUGGESTIONS.map((currency) => (
+                      <button
+                        key={currency}
+                        type="button"
+                        onClick={() => setSalaryCurrency(currency)}
+                        className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${
+                          salaryCurrency === currency
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                        }`}
+                      >
+                        {currency}
+                      </button>
+                    ))}
+                  </div>
                   <input
                     type="text"
                     value={salaryCurrency}
@@ -321,8 +379,46 @@ export function GuidedQuestionsView({
                 </label>
               </div>
 
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Salary range presets</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[
+                    { label: '€40k–€60k', min: 40000, max: 60000 },
+                    { label: '€60k–€80k', min: 60000, max: 80000 },
+                    { label: '€80k–€100k', min: 80000, max: 100000 },
+                    { label: '€100k–€130k', min: 100000, max: 130000 },
+                    { label: '€130k+', min: 130000, max: 180000 },
+                  ].map((range) => (
+                    <button
+                      key={range.label}
+                      type="button"
+                      onClick={() => setSalaryRange(range.min, range.max)}
+                      className={SUGGESTION_BTN}
+                    >
+                      {range.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Start Timeline</span>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {START_TIMELINE_SUGGESTIONS.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setStartTimeline(item)}
+                      className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${
+                        startTimeline === item
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
                 <input
                   type="text"
                   value={startTimeline}
@@ -383,6 +479,18 @@ export function GuidedQuestionsView({
 
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Hard Constraints (comma-separated)</span>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {CONSTRAINT_SUGGESTIONS.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setConstraints((prev) => appendCommaItem(prev, item))}
+                      className={SUGGESTION_BTN}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
                 <input
                   type="text"
                   value={constraints}
@@ -394,6 +502,18 @@ export function GuidedQuestionsView({
 
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Extra Notes</span>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {NOTE_SUGGESTIONS.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setNotes(item)}
+                      className={SUGGESTION_BTN}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
