@@ -52,6 +52,12 @@ const TINYFISH_RUN_BATCH_URL =
 const TINYFISH_RUNS_BASE_URL = process.env.TINYFISH_RUNS_BASE_URL || 'https://agent.tinyfish.ai/v1/runs'
 const TINYFISH_SSE_TIMEOUT_MS = Number(process.env.TINYFISH_SSE_TIMEOUT_MS || 1000 * 60 * 6)
 const TINYFISH_HTTP_TIMEOUT_MS = Number(process.env.TINYFISH_HTTP_TIMEOUT_MS || 1000 * 60)
+const TINYFISH_ASYNC_FALLBACK_TIMEOUT_MS = Number(
+  process.env.TINYFISH_ASYNC_FALLBACK_TIMEOUT_MS || 1000 * 60 * 12,
+)
+const TINYFISH_POLL_SHORT_MS = 2500
+const TINYFISH_POLL_MEDIUM_MS = 7500
+const TINYFISH_POLL_LONG_MS = 30000
 
 function readApiKeyFromMissionControlSecrets(): string | null {
   try {
@@ -291,4 +297,83 @@ export async function getTinyfishRunById(runId: string): Promise<TinyfishRunStat
       Accept: 'application/json',
     },
   })
+}
+
+function pollingIntervalForElapsed(elapsedMs: number): number {
+  if (elapsedMs < 60_000) return TINYFISH_POLL_SHORT_MS
+  if (elapsedMs < 5 * 60_000) return TINYFISH_POLL_MEDIUM_MS
+  return TINYFISH_POLL_LONG_MS
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function extractRunPayload(run: TinyfishRunStatusResponse | null | undefined): any {
+  const anyRun = run as any
+  if (!anyRun || typeof anyRun !== 'object') return null
+  return (
+    anyRun?.result ??
+    anyRun?.result_json ??
+    anyRun?.resultJson ??
+    anyRun?.data?.result ??
+    anyRun?.data?.result_json ??
+    anyRun?.data?.resultJson ??
+    null
+  )
+}
+
+export async function waitForTinyfishRunCompletion(runId: string): Promise<TinyfishRunStatusResponse> {
+  const startedAt = Date.now()
+  let completedWithoutPayloadCount = 0
+
+  while (true) {
+    const run = await getTinyfishRunById(runId)
+    const status = String(run.status || '').toUpperCase()
+
+    if (status === 'COMPLETED') {
+      const payload = extractRunPayload(run)
+      if (payload != null) return run
+      completedWithoutPayloadCount += 1
+      if (completedWithoutPayloadCount >= 6) return run
+    }
+
+    if (status === 'FAILED' || status === 'CANCELLED') return run
+
+    const elapsed = Date.now() - startedAt
+    if (elapsed >= TINYFISH_ASYNC_FALLBACK_TIMEOUT_MS) {
+      throw new Error(
+        `TinyFish async fallback timed out after ${Math.round(TINYFISH_ASYNC_FALLBACK_TIMEOUT_MS / 1000)}s`,
+      )
+    }
+
+    await wait(pollingIntervalForElapsed(elapsed))
+  }
+}
+
+export async function runTinyfishWithFallback(req: TinyfishRunRequest): Promise<TinyfishSseEvent> {
+  try {
+    return await runTinyfish(req)
+  } catch (primaryErr: any) {
+    const primaryDetails = primaryErr?.message || String(primaryErr || 'Unknown TinyFish SSE error')
+
+    const asyncStart = await runTinyfishAsync(req)
+    const runId = String(asyncStart?.run_id || '').trim()
+    if (!runId) {
+      throw new Error(`TinyFish SSE failed and async fallback did not return run_id. SSE details: ${primaryDetails}`)
+    }
+
+    const run = await waitForTinyfishRunCompletion(runId)
+    const status = String(run.status || '').toUpperCase()
+    if (status === 'COMPLETED') {
+      return {
+        type: 'COMPLETE',
+        status: 'COMPLETED',
+        resultJson: extractRunPayload(run),
+      }
+    }
+
+    const reason = (run as any)?.error?.message || (run as any)?.error?.details || `status=${run.status}`
+    throw new Error(`TinyFish SSE failed (${primaryDetails}); async fallback run ${runId} ended with ${reason}`)
+  }
 }

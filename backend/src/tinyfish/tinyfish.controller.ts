@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/jwt.guard'
 import {
   getTinyfishRunById,
   runTinyfish,
+  runTinyfishWithFallback,
   runTinyfishAsync,
   runTinyfishBatch,
   TinyfishRunRequest,
@@ -53,7 +54,7 @@ export class TinyfishController {
     }
 
     try {
-      const evt = await runTinyfish(parsed)
+      const evt = await runTinyfishWithFallback(parsed)
       return evt
     } catch (e: any) {
       const details = e?.message || String(e)
