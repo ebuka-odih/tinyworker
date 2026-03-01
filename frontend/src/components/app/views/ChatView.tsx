@@ -1,7 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, ExternalLink, History, LoaderCircle, MessageSquarePlus, Search, Settings, Sparkles, Trash2, Upload } from 'lucide-react'
+import {
+  ArrowRight,
+  Bot,
+  ExternalLink,
+  History,
+  LoaderCircle,
+  MessageSquarePlus,
+  PauseCircle,
+  PlayCircle,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
+  Trash2,
+  Upload,
+} from 'lucide-react'
 import { motion } from 'motion/react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import {
   Application,
@@ -16,7 +32,9 @@ import { tinyfishService } from '../../../services/tinyfishService'
 import { Badge, Button, Card } from '../AppPrimitives'
 
 type FlowDomain = 'jobs' | 'scholarships'
-type WorkspaceMode = 'chat' | 'matches' | 'settings'
+type WorkspaceMode = 'execution' | 'chat' | 'matches' | 'settings'
+type ExecutionStatus = 'running' | 'paused' | 'completed'
+type ExecutionStage = 'early' | 'scanning' | 'shortlisting' | 'finalizing'
 
 type FlowStep = {
   key: string
@@ -51,6 +69,24 @@ type ChatSession = {
   updatedAt: string
   messages: LocalChatMessage[]
   flow: FlowState | null
+  execution: SearchExecutionState | null
+  lastJobCriteria: Record<string, string> | null
+}
+
+type ExecutionTimelineItem = {
+  id: string
+  content: string
+  createdAt: string
+  stage: ExecutionStage
+  resultsFound?: number
+}
+
+type SearchExecutionState = {
+  status: ExecutionStatus
+  stage: ExecutionStage
+  timeline: ExecutionTimelineItem[]
+  resultsFound: number
+  lastCompletedStep: string | null
 }
 
 type PersistedChatState = {
@@ -257,7 +293,26 @@ function createSession(title = 'New Search'): ChatSession {
     updatedAt: now,
     messages: [initialAssistantMessage()],
     flow: null,
+    execution: null,
+    lastJobCriteria: null,
   }
+}
+
+function createExecutionState(): SearchExecutionState {
+  return {
+    status: 'running',
+    stage: 'early',
+    timeline: [],
+    resultsFound: 0,
+    lastCompletedStep: null,
+  }
+}
+
+function stageLabel(stage: ExecutionStage): string {
+  if (stage === 'early') return 'Early stage'
+  if (stage === 'scanning') return 'Active scanning'
+  if (stage === 'shortlisting') return 'Shortlisting'
+  return 'Finalizing matches'
 }
 
 function storageKeyForOwner(owner: string): string {
@@ -322,6 +377,7 @@ export function ChatView({
   sessionOwnerId: string
 }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [isHydrated, setIsHydrated] = useState(false)
@@ -333,6 +389,11 @@ export function ChatView({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoIntentSearchHandledRef = useRef<string | null>(null)
+  const runTokenRef = useRef<Record<string, string>>({})
+  const stopRequestedRef = useRef<Record<string, boolean>>({})
+  const pausedExecutionRef = useRef<Record<string, boolean>>({})
+  const queuedExecutionRef = useRef<Record<string, ExecutionTimelineItem[]>>({})
+  const completionWhilePausedRef = useRef<Record<string, boolean>>({})
 
   const storageKey = useMemo(() => storageKeyForOwner(sessionOwnerId || 'anon'), [sessionOwnerId])
   const intentSearchSignal = useMemo(() => {
@@ -353,6 +414,7 @@ export function ChatView({
 
   const messages = activeSession?.messages || []
   const flow = activeSession?.flow || null
+  const execution = activeSession?.execution || null
   const isActiveSessionBusy = Boolean(activeSession?.id && busySessionIds.includes(activeSession.id))
 
   const groupedOpportunities = useMemo(() => {
@@ -416,6 +478,119 @@ export function ChatView({
     updateSession(sessionId, (session) => ({ ...session, flow: nextFlow ? cloneFlowState(nextFlow) : null }))
   }
 
+  const setSessionExecution = (
+    sessionId: string,
+    updater: (execution: SearchExecutionState | null) => SearchExecutionState | null,
+  ) => {
+    updateSession(sessionId, (session) => ({
+      ...session,
+      execution: updater(session.execution),
+    }))
+  }
+
+  const appendExecutionTimeline = (
+    sessionId: string,
+    content: string,
+    options?: { stage?: ExecutionStage; resultsFound?: number; force?: boolean },
+  ) => {
+    const nextStage = options?.stage || 'early'
+    const item: ExecutionTimelineItem = {
+      id: makeId('exec'),
+      content,
+      createdAt: new Date().toISOString(),
+      stage: nextStage,
+      resultsFound: options?.resultsFound,
+    }
+
+    if (!options?.force && pausedExecutionRef.current[sessionId]) {
+      queuedExecutionRef.current[sessionId] = [...(queuedExecutionRef.current[sessionId] || []), item]
+      return
+    }
+
+    setSessionExecution(sessionId, (current) => {
+      const base = current || createExecutionState()
+      return {
+        ...base,
+        stage: options?.stage || base.stage,
+        timeline: [...base.timeline, item],
+        resultsFound:
+          typeof options?.resultsFound === 'number'
+            ? options.resultsFound
+            : typeof item.resultsFound === 'number'
+              ? item.resultsFound
+              : base.resultsFound,
+        lastCompletedStep: content,
+      }
+    })
+  }
+
+  const flushQueuedExecution = (sessionId: string) => {
+    const queued = queuedExecutionRef.current[sessionId] || []
+    if (!queued.length) return
+
+    setSessionExecution(sessionId, (current) => {
+      const base = current || createExecutionState()
+      const last = queued[queued.length - 1]
+      const nextResults =
+        typeof last.resultsFound === 'number'
+          ? last.resultsFound
+          : typeof base.resultsFound === 'number'
+            ? base.resultsFound
+            : 0
+      return {
+        ...base,
+        stage: last.stage || base.stage,
+        timeline: [...base.timeline, ...queued],
+        resultsFound: nextResults,
+        lastCompletedStep: last.content,
+      }
+    })
+
+    queuedExecutionRef.current[sessionId] = []
+  }
+
+  const pauseExecution = (sessionId: string) => {
+    if (!busySessionIds.includes(sessionId)) return
+    pausedExecutionRef.current[sessionId] = true
+    setSessionExecution(sessionId, (current) => {
+      const base = current || createExecutionState()
+      return { ...base, status: 'paused' }
+    })
+  }
+
+  const resumeExecution = (sessionId: string) => {
+    pausedExecutionRef.current[sessionId] = false
+    setSessionExecution(sessionId, (current) => {
+      const base = current || createExecutionState()
+      return { ...base, status: 'running' }
+    })
+    flushQueuedExecution(sessionId)
+
+    if (completionWhilePausedRef.current[sessionId]) {
+      completionWhilePausedRef.current[sessionId] = false
+      setSessionExecution(sessionId, (current) => {
+        const base = current || createExecutionState()
+        return { ...base, status: 'completed' }
+      })
+    }
+  }
+
+  const stopExecution = (sessionId: string) => {
+    stopRequestedRef.current[sessionId] = true
+    pausedExecutionRef.current[sessionId] = false
+    completionWhilePausedRef.current[sessionId] = false
+    queuedExecutionRef.current[sessionId] = []
+    appendExecutionTimeline(sessionId, 'Search stopped. You can refine your goal or ask the agent for next steps.', {
+      stage: 'finalizing',
+      force: true,
+    })
+    setSessionExecution(sessionId, (current) => {
+      const base = current || createExecutionState()
+      return { ...base, status: 'completed', stage: 'finalizing' }
+    })
+    setSessionBusy(sessionId, false)
+  }
+
   const scrollToBottom = () => {
     const el = scrollRef.current
     if (!el) return
@@ -432,6 +607,11 @@ export function ChatView({
     setWorkspaceMode('chat')
     setIsMobileHistoryOpen(false)
     setAwaitingLinkedinUrlSessionId(null)
+    runTokenRef.current = {}
+    stopRequestedRef.current = {}
+    pausedExecutionRef.current = {}
+    queuedExecutionRef.current = {}
+    completionWhilePausedRef.current = {}
 
     try {
       const raw = localStorage.getItem(storageKey)
@@ -444,6 +624,22 @@ export function ChatView({
             ...session,
             messages: session.messages.map((msg) => ({ ...msg, id: msg.id || makeId('msg') })),
             flow: session.flow ? cloneFlowState(session.flow) : null,
+            execution: session.execution
+              ? {
+                  ...session.execution,
+                  timeline: Array.isArray(session.execution.timeline)
+                    ? session.execution.timeline.map((item) => ({
+                        ...item,
+                        id: item.id || makeId('exec'),
+                        stage: item.stage || session.execution.stage || 'early',
+                      }))
+                    : [],
+                }
+              : null,
+            lastJobCriteria:
+              session.lastJobCriteria && typeof session.lastJobCriteria === 'object'
+                ? { ...session.lastJobCriteria }
+                : null,
           }))
 
         if (normalized.length) {
@@ -473,6 +669,13 @@ export function ChatView({
     }
     localStorage.setItem(storageKey, JSON.stringify(payload))
   }, [isHydrated, storageKey, sessions, activeSessionId])
+
+  useEffect(() => {
+    if (!activeSession?.execution) return
+    if (activeSession.execution.status === 'running' || activeSession.execution.status === 'paused') {
+      setWorkspaceMode('execution')
+    }
+  }, [activeSession?.execution, activeSession?.id])
 
   const askCurrentStep = (sessionId: string, nextFlow: FlowState) => {
     const flowSnapshot = cloneFlowState(nextFlow)
@@ -553,6 +756,11 @@ export function ChatView({
     })
 
     setBusySessionIds((prev) => prev.filter((id) => id !== sessionId))
+    delete runTokenRef.current[sessionId]
+    delete stopRequestedRef.current[sessionId]
+    delete pausedExecutionRef.current[sessionId]
+    delete queuedExecutionRef.current[sessionId]
+    delete completionWhilePausedRef.current[sessionId]
     setAwaitingLinkedinUrlSessionId((prev) => (prev === sessionId ? null : prev))
     setInputValue('')
     setWorkspaceMode('chat')
@@ -566,27 +774,23 @@ export function ChatView({
   }
 
   const runJobSearch = async (sessionId: string, criteria: Record<string, string>) => {
+    const runToken = makeId('run')
+    runTokenRef.current[sessionId] = runToken
+    stopRequestedRef.current[sessionId] = false
+    pausedExecutionRef.current[sessionId] = false
+    queuedExecutionRef.current[sessionId] = []
+    completionWhilePausedRef.current[sessionId] = false
+
+    setWorkspaceMode('execution')
     setSessionBusy(sessionId, true)
-    const progressMessageId = makeId('msg')
-    const setProgress = (content: string, done = false) => {
-      updateSession(sessionId, (session) => {
-        const nextMessage: LocalChatMessage = {
-          id: progressMessageId,
-          role: 'assistant',
-          type: done ? 'text' : 'progress',
-          content,
-        }
-        const idx = session.messages.findIndex((msg) => msg.id === progressMessageId)
-        if (idx === -1) {
-          return { ...session, messages: [...session.messages, nextMessage] }
-        }
-        const updatedMessages = [...session.messages]
-        updatedMessages[idx] = nextMessage
-        return { ...session, messages: updatedMessages }
-      })
-    }
+    setSessionExecution(sessionId, () => createExecutionState())
+    updateSession(sessionId, (session) => ({ ...session, lastJobCriteria: { ...criteria } }))
 
     try {
+      const stillActive = () => {
+        return runTokenRef.current[sessionId] === runToken && !stopRequestedRef.current[sessionId]
+      }
+
       const title = criteria.job_title && normalizeText(criteria.job_title) !== 'skip' ? criteria.job_title : 'Software Engineer'
       const focus = criteria.job_focus && normalizeText(criteria.job_focus) !== 'any' ? criteria.job_focus : ''
       const location = criteria.job_location && normalizeText(criteria.job_location) !== 'global' ? criteria.job_location : 'Remote'
@@ -596,24 +800,40 @@ export function ChatView({
       const salary = criteria.job_salary && normalizeText(criteria.job_salary) !== 'skip' ? criteria.job_salary : ''
       const query = [title, focus, location, mode, stack, visaHint, salary].filter(Boolean).join(' ').trim()
 
-      setProgress('Commentary: validating your selected filters and cleaning query terms.')
+      appendExecutionTimeline(sessionId, 'Validating your criteria', { stage: 'early' })
       await wait(400)
+      if (!stillActive()) return
 
-      setProgress(`Commentary: built search query -> "${query}"`)
+      appendExecutionTimeline(sessionId, 'Normalizing job titles and search terms', { stage: 'early' })
       await wait(420)
+      if (!stillActive()) return
 
-      setProgress('Commentary: calling TinyFish to scan LinkedIn public job listings.')
+      appendExecutionTimeline(sessionId, `Scanning ${location} job boards and public listings`, { stage: 'scanning' })
 
       const results = await tinyfishService.searchJobsLinkedIn(query, criteria)
+      if (!stillActive()) return
 
-      setProgress(`Commentary: fetched ${results.length} listing(s); ranking and preparing persistence.`)
+      appendExecutionTimeline(sessionId, 'Filtering visa-friendly and profile-compatible opportunities', {
+        stage: 'shortlisting',
+        resultsFound: results.length,
+      })
       await wait(280)
+      if (!stillActive()) return
 
       await onImportOpportunities(results)
+      if (!stillActive()) return
 
-      setProgress(`Commentary: saved ${results.length} listing(s) into your opportunities pipeline.`)
+      appendExecutionTimeline(sessionId, 'Ranking matches based on your CV alignment', {
+        stage: 'shortlisting',
+        resultsFound: results.length,
+      })
       await wait(220)
-      setProgress('Commentary: search completed. Delivering ranked results.', true)
+      if (!stillActive()) return
+
+      appendExecutionTimeline(sessionId, `Finalizing ${results.length} saved match${results.length === 1 ? '' : 'es'}`, {
+        stage: 'finalizing',
+        resultsFound: results.length,
+      })
 
       appendAssistantMessage(sessionId, {
         content: [
@@ -642,14 +862,31 @@ export function ChatView({
       appendAssistantMessage(
         sessionId,
         {
-          content: 'You can start a new search, continue chat, or open the Matches view.',
+          content: 'Search run completed. You can continue scanning, open matches, or ask the agent.',
           type: 'options',
-          options: ['New Jobs Search', 'View Matches', 'Settings'],
+          options: ['Continue Scanning', 'View Matches', 'Ask the Agent', 'Settings'],
         },
         { type: 'root' },
       )
+
+      if (pausedExecutionRef.current[sessionId]) {
+        completionWhilePausedRef.current[sessionId] = true
+      } else {
+        setSessionExecution(sessionId, (current) => {
+          const base = current || createExecutionState()
+          return { ...base, status: 'completed', stage: 'finalizing' }
+        })
+      }
     } catch (e: any) {
-      setProgress('Commentary: search failed. Returning error details.', true)
+      if (stopRequestedRef.current[sessionId]) return
+      appendExecutionTimeline(sessionId, 'Search run failed. Returning error details.', {
+        stage: 'finalizing',
+        force: true,
+      })
+      setSessionExecution(sessionId, (current) => {
+        const base = current || createExecutionState()
+        return { ...base, status: 'completed', stage: 'finalizing' }
+      })
       appendAssistantMessage(sessionId, {
         content: e?.message || 'Job search failed. Please try again.',
       })
@@ -659,17 +896,38 @@ export function ChatView({
         {
           content: 'Choose next action.',
           type: 'options',
-          options: ['Retry Jobs Search', 'View Matches'],
+          options: ['Continue Scanning', 'View Matches', 'Ask the Agent'],
         },
         { type: 'root' },
       )
     } finally {
       setSessionFlow(sessionId, null)
-      setSessionBusy(sessionId, false)
+      if (runTokenRef.current[sessionId] === runToken) {
+        runTokenRef.current[sessionId] = ''
+        setSessionBusy(sessionId, false)
+      }
     }
   }
 
   const runScholarshipSearch = async (sessionId: string) => {
+    setWorkspaceMode('execution')
+    setSessionExecution(sessionId, (current) => {
+      const base = current || createExecutionState()
+      return { ...base, status: 'running' }
+    })
+    appendExecutionTimeline(sessionId, 'Validating your scholarship criteria', { stage: 'early', force: true })
+    await wait(180)
+    appendExecutionTimeline(sessionId, 'Preparing destination and funding filters', { stage: 'scanning', force: true })
+    await wait(220)
+    appendExecutionTimeline(sessionId, 'Scholarship live search integration is not wired yet in web chat', {
+      stage: 'finalizing',
+      force: true,
+    })
+    setSessionExecution(sessionId, (current) => {
+      const base = current || createExecutionState()
+      return { ...base, status: 'completed', stage: 'finalizing' }
+    })
+
     appendAssistantMessage(sessionId, {
       content:
         'Scholarship live search integration is next. Your scholarship criteria has been captured and is ready for backend execution.',
@@ -680,7 +938,7 @@ export function ChatView({
       {
         content: 'Choose next action.',
         type: 'options',
-        options: ['New Scholarships Search', 'View Matches'],
+        options: ['New Scholarships Search', 'Ask the Agent', 'View Matches'],
       },
       { type: 'root' },
     )
@@ -722,32 +980,28 @@ export function ChatView({
     const nextSession = createSession('Intent Search')
     setSessions((prev) => [nextSession, ...prev])
     setActiveSessionId(nextSession.id)
-    setWorkspaceMode('chat')
+    setWorkspaceMode('execution')
     setInputValue('')
     setIsMobileHistoryOpen(false)
     setAwaitingLinkedinUrlSessionId(null)
 
-    appendAssistantMessage(nextSession.id, {
-      content: 'Using your saved criteria. Starting search now.',
-    })
+    setSessionExecution(nextSession.id, () => createExecutionState())
+    appendExecutionTimeline(nextSession.id, 'Using your saved criteria', { stage: 'early', force: true })
 
     const goal = candidateIntent?.goal || 'job'
 
     if (goal === 'scholarship') {
-      appendAssistantMessage(nextSession.id, {
-        content:
-          'Scholarship live search is not wired yet. Your scholarship intent is saved; use Jobs for live run right now.',
-      })
-      appendAssistantMessage(
-        nextSession.id,
-        {
-          content: 'Choose next action.',
-          type: 'options',
-          options: ['New Scholarships Search', 'Jobs', 'View Matches'],
-        },
-        { type: 'root' },
-      )
+      void runScholarshipSearch(nextSession.id)
     } else if (goal === 'visa') {
+      appendExecutionTimeline(nextSession.id, 'Validating visa intent', { stage: 'early', force: true })
+      appendExecutionTimeline(nextSession.id, 'Visa live search is not wired yet in web chat', {
+        stage: 'finalizing',
+        force: true,
+      })
+      setSessionExecution(nextSession.id, (current) => {
+        const base = current || createExecutionState()
+        return { ...base, status: 'completed', stage: 'finalizing' }
+      })
       appendAssistantMessage(nextSession.id, {
         content: 'Visa live search in web chat is not wired yet. Your visa intent is saved.',
       })
@@ -756,7 +1010,7 @@ export function ChatView({
         {
           content: 'Choose next action.',
           type: 'options',
-          options: ['Jobs', 'Scholarships', 'View Matches'],
+          options: ['Jobs', 'Scholarships', 'Ask the Agent', 'View Matches'],
         },
         { type: 'root' },
       )
@@ -784,6 +1038,17 @@ export function ChatView({
       return
     }
 
+    if (normalized === normalizeText('Continue Scanning')) {
+      const session = sessions.find((s) => s.id === sessionId)
+      if (session?.lastJobCriteria) {
+        if (session.execution?.status === 'paused') resumeExecution(sessionId)
+        void runJobSearch(sessionId, session.lastJobCriteria)
+        return
+      }
+      restartFlow(sessionId, 'jobs')
+      return
+    }
+
     if (normalized === normalizeText('Scholarships') || normalized === normalizeText('New Scholarships Search')) {
       setWorkspaceMode('chat')
       restartFlow(sessionId, 'scholarships')
@@ -792,6 +1057,14 @@ export function ChatView({
 
     if (normalized === normalizeText('View Matches') || normalized === normalizeText('Open Matches')) {
       setWorkspaceMode('matches')
+      return
+    }
+
+    if (normalized === normalizeText('Ask the Agent')) {
+      setWorkspaceMode('chat')
+      appendAssistantMessage(sessionId, {
+        content: 'Search context is active. Ask a specific question and I will respond with your current search state.',
+      })
       return
     }
 
@@ -1043,6 +1316,16 @@ export function ChatView({
     }
   }
 
+  const primaryWorkspaceMode: WorkspaceMode = execution ? 'execution' : 'chat'
+  const executionStatusLabel =
+    execution?.status === 'running' ? 'Running' : execution?.status === 'paused' ? 'Paused' : 'Completed'
+  const executionStatusTone =
+    execution?.status === 'running'
+      ? 'bg-emerald-500'
+      : execution?.status === 'paused'
+        ? 'bg-amber-500'
+        : 'bg-slate-400'
+
   if (!activeSession) {
     return <div className="p-4 text-sm text-slate-500">Loading chat...</div>
   }
@@ -1113,9 +1396,17 @@ export function ChatView({
             <div className="min-w-0">
               <h3 className="font-bold text-slate-900 text-sm truncate">Opportunity Agent Workspace</h3>
               <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Chat First</span>
-                <span className="text-[10px] text-slate-400">• History + Matches + Settings</span>
+                <div
+                  className={`w-1.5 h-1.5 rounded-full ${execution ? executionStatusTone : 'bg-emerald-500'} ${
+                    execution?.status === 'running' ? 'animate-pulse' : ''
+                  }`}
+                />
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  {execution ? `Search ${executionStatusLabel}` : 'Agent Ready'}
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {execution ? `• ${stageLabel(execution.stage)}` : '• Chat + Matches + Settings'}
+                </span>
               </div>
             </div>
           </div>
@@ -1133,6 +1424,16 @@ export function ChatView({
             </button>
 
             <div className="hidden sm:flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+              {execution ? (
+                <button
+                  className={`px-3 py-1.5 text-xs rounded-lg font-semibold ${
+                    workspaceMode === 'execution' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+                  }`}
+                  onClick={() => setWorkspaceMode('execution')}
+                >
+                  Search
+                </button>
+              ) : null}
               <button
                 className={`px-3 py-1.5 text-xs rounded-lg font-semibold ${workspaceMode === 'chat' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
                 onClick={() => setWorkspaceMode('chat')}
@@ -1153,7 +1454,10 @@ export function ChatView({
               </button>
             </div>
 
-            <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">
+            <button
+              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              onClick={() => setWorkspaceMode(execution ? 'execution' : 'chat')}
+            >
               <Search size={18} />
             </button>
             <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors" onClick={() => setWorkspaceMode('settings')}>
@@ -1204,8 +1508,189 @@ export function ChatView({
           </div>
         ) : null}
 
+        {workspaceMode === 'execution' && execution ? (
+          <div className="flex-1 overflow-y-auto px-3 py-3 md:px-4 md:py-4 pb-24">
+            <div className="mx-auto w-full max-w-5xl space-y-3 md:space-y-4">
+              <Card className="border-slate-200 bg-white">
+                <div className="flex flex-col gap-3 md:gap-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <h2 className="text-lg md:text-xl font-bold text-slate-900">Searching for opportunities</h2>
+                      <p className="text-xs md:text-sm text-slate-500">Using your saved criteria</p>
+                    </div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-2.5 py-1 text-[11px] md:text-xs font-semibold text-slate-700">
+                      <span
+                        className={`h-2 w-2 rounded-full ${executionStatusTone} ${
+                          execution.status === 'running' ? 'animate-pulse' : ''
+                        }`}
+                      />
+                      {executionStatusLabel}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 md:gap-2">
+                    {execution.status === 'running' ? (
+                      <Button variant="outline" className="text-xs md:text-sm" onClick={() => pauseExecution(activeSession.id)}>
+                        <PauseCircle size={14} /> Pause Search
+                      </Button>
+                    ) : execution.status === 'paused' ? (
+                      <Button variant="outline" className="text-xs md:text-sm" onClick={() => resumeExecution(activeSession.id)}>
+                        <PlayCircle size={14} /> Resume Search
+                      </Button>
+                    ) : null}
+                    <Button variant="outline" className="text-xs md:text-sm" onClick={() => navigate('/guided-questions')}>
+                      <SlidersHorizontal size={14} /> Refine Goal
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="text-xs md:text-sm"
+                      onClick={() => stopExecution(activeSession.id)}
+                      disabled={execution.status === 'completed'}
+                    >
+                      <Square size={14} /> Stop Search
+                    </Button>
+                    <Button variant="outline" className="text-xs md:text-sm" onClick={() => setWorkspaceMode('chat')}>
+                      <Bot size={14} /> Ask the Agent
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="border-slate-200 bg-white">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-slate-900">Live commentary timeline</div>
+                    <div className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">
+                      {stageLabel(execution.stage)}
+                    </div>
+                  </div>
+
+                  {execution.timeline.length ? (
+                    <div className="space-y-1.5 md:space-y-2">
+                      {execution.timeline.map((item, index) => {
+                        const isLatest = index === execution.timeline.length - 1
+                        return (
+                          <div
+                            key={item.id}
+                            className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 ${
+                              isLatest ? 'border-slate-300 bg-slate-100/70' : 'border-slate-100 bg-slate-50'
+                            }`}
+                          >
+                            <span className={`mt-1.5 h-2 w-2 rounded-full ${isLatest ? 'bg-slate-700' : 'bg-slate-400'}`} />
+                            <div className="min-w-0 flex-1">
+                              <div className={`text-sm leading-snug ${isLatest ? 'text-slate-900 font-medium' : 'text-slate-800'}`}>
+                                {item.content}
+                              </div>
+                              <div className="mt-0.5 text-[10px] uppercase tracking-wide text-slate-500">
+                                {new Date(item.createdAt).toLocaleTimeString()}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+                      Search execution is starting. Commentary will appear here.
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Card className="border-slate-200 bg-white">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Search stage</div>
+                    <div className="mt-0.5 text-sm text-slate-900">{stageLabel(execution.stage)}</div>
+                  </div>
+                  {execution.lastCompletedStep ? (
+                    <div className="max-w-[60%] text-right text-xs text-slate-500">
+                      Last step: <span className="text-slate-700">{execution.lastCompletedStep}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </Card>
+
+              {execution.resultsFound > 0 ? (
+                <Card className="border-emerald-200 bg-emerald-50/60">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-emerald-800">Results Found</div>
+                      <div className="text-xs text-emerald-700">{execution.resultsFound} opportunities are now in your pipeline.</div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 md:gap-2">
+                      <Button variant="outline" className="text-xs md:text-sm" onClick={() => setWorkspaceMode('matches')}>
+                        View Matches
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="text-xs md:text-sm"
+                        onClick={() => {
+                          if (!activeSession.lastJobCriteria || isActiveSessionBusy) return
+                          void runJobSearch(activeSession.id, activeSession.lastJobCriteria)
+                        }}
+                        disabled={!activeSession.lastJobCriteria || isActiveSessionBusy}
+                      >
+                        Continue Scanning
+                      </Button>
+                      {execution.status === 'running' ? (
+                        <Button variant="outline" className="text-xs md:text-sm" onClick={() => pauseExecution(activeSession.id)}>
+                          Pause
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                </Card>
+              ) : null}
+
+              {execution.status === 'paused' ? (
+                <Card className="border-amber-200 bg-amber-50/60">
+                  <div className="space-y-2.5">
+                    <div>
+                      <div className="text-sm font-semibold text-amber-800">Search paused</div>
+                      <div className="text-xs text-amber-700">
+                        Last completed step: {execution.lastCompletedStep || 'No completed step yet'}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 md:gap-2">
+                      <Button variant="outline" className="text-xs md:text-sm" onClick={() => resumeExecution(activeSession.id)}>
+                        Resume
+                      </Button>
+                      <Button variant="outline" className="text-xs md:text-sm" onClick={() => navigate('/guided-questions')}>
+                        Refine Goal
+                      </Button>
+                      <Button variant="outline" className="text-xs md:text-sm" onClick={() => stopExecution(activeSession.id)}>
+                        End Session
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         {workspaceMode === 'chat' ? (
           <>
+            {execution ? (
+              <div className="px-4 pt-4">
+                <div className="mx-auto w-full max-w-5xl">
+                  <Card className="border-slate-200 bg-white">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">Search context attached</div>
+                        <div className="text-xs text-slate-500">
+                          {executionStatusLabel} • {stageLabel(execution.stage)}
+                        </div>
+                      </div>
+                      <Button variant="outline" className="text-xs md:text-sm" onClick={() => setWorkspaceMode('execution')}>
+                        Return To Search Timeline
+                      </Button>
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            ) : null}
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-6 pb-[180px] md:pb-44 scroll-smooth">
               {messages.map((msg) => (
                 <motion.div
@@ -1362,8 +1847,8 @@ export function ChatView({
                 </div>
                 <p className="text-[10px] text-center text-slate-400 mt-1 md:mt-2 font-medium">
                   {isActiveSessionBusy
-                    ? 'Search in progress. Live commentary will appear in this chat.'
-                    : 'Everything now flows through chat: criteria, search, matches, and settings.'}
+                    ? 'Search is active. Use Search view for live execution commentary.'
+                    : 'Chat is contextual. Use it for questions and clarifications.'}
                 </p>
               </div>
             </div>
@@ -1377,7 +1862,9 @@ export function ChatView({
                 <h2 className="text-2xl font-bold text-slate-900">Matched Results</h2>
                 <p className="text-sm text-slate-500">All saved matches across jobs, scholarships, and visa.</p>
               </div>
-              <Button variant="outline" onClick={() => setWorkspaceMode('chat')}>Back To Chat</Button>
+              <Button variant="outline" onClick={() => setWorkspaceMode(primaryWorkspaceMode)}>
+                {primaryWorkspaceMode === 'execution' ? 'Back To Search' : 'Back To Chat'}
+              </Button>
             </header>
 
             <div className="grid md:grid-cols-3 gap-4">
@@ -1481,7 +1968,9 @@ export function ChatView({
                 <h2 className="text-2xl font-bold text-slate-900">Settings & Profile</h2>
                 <p className="text-sm text-slate-500">Account snapshot and preferences used by the chat engine.</p>
               </div>
-              <Button variant="outline" onClick={() => setWorkspaceMode('chat')}>Back To Chat</Button>
+              <Button variant="outline" onClick={() => setWorkspaceMode(primaryWorkspaceMode)}>
+                {primaryWorkspaceMode === 'execution' ? 'Back To Search' : 'Back To Chat'}
+              </Button>
             </header>
 
             <div className="grid md:grid-cols-2 gap-4">

@@ -156,7 +156,7 @@ export function GuidedQuestionsView({
 
     try {
       await onSaveIntent({ ...buildPayload(), status })
-      setSaveMessage(status === 'ready' ? 'Saved. Opening agent search...' : 'Progress saved.')
+      setSaveMessage(status === 'ready' ? 'Saved. Starting live search execution...' : 'Progress saved.')
       return true
     } catch (e: any) {
       setLocalError(e?.message || 'Failed to save guided profile')
@@ -581,7 +581,7 @@ export function GuidedQuestionsView({
             <div className="flex items-start gap-2">
               <MessageSquare size={16} className="text-slate-500 mt-0.5" />
               <p className="text-xs text-slate-600">
-                Values above update as you type. Click <span className="font-semibold">Save and Continue Search</span> to move into the agent flow.
+                Values above update as you type. Click <span className="font-semibold">Save and Continue Search</span> to enter live search execution.
               </p>
             </div>
           </Card>

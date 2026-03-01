@@ -634,7 +634,7 @@ export default function App() {
                       onUploadCv={uploadCv}
                       onOpenBuildResume={() => navigate('/build-resume')}
                       onOpenGuidedQuestions={() => navigate('/guided-questions')}
-                      onContinueSearch={() => navigate('/chat')}
+                      onContinueSearch={() => navigate('/chat?intentSearch=dashboard')}
                       onExtractProfile={extractProfileFromCv}
                       onCreateApplication={createApplication}
                       onCreateDocument={createDocument}
