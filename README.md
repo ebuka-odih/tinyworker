@@ -12,7 +12,7 @@ It helps users:
 
 ## Repo structure
 
-- `./web/` — Frontend (Opportunity Agent UI, Vercel target)
+- `./frontend/` — Frontend (Opportunity Agent UI, Vercel target)
 - `./backend/` — Backend API (NestJS + Postgres + Prisma)
 
 ## Local development
@@ -20,7 +20,7 @@ It helps users:
 ### Full stack (recommended)
 
 ```bash
-npm --prefix web install
+npm --prefix frontend install
 npm --prefix backend install
 npm run dev
 ```
@@ -31,10 +31,10 @@ npm run dev
 
 ### Frontend only
 
-See: [`web/.env.example`](web/.env.example)
+See: [`frontend/.env.example`](frontend/.env.example)
 
 ```bash
-cd web
+cd frontend
 npm install
 npm run dev
 ```
@@ -54,7 +54,7 @@ npm run start:dev
 
 ## Deployment folder targets
 
-- Vercel frontend project root: `web/`
+- Vercel frontend project root: `frontend/`
 - Backend project root: `backend/`
 
 ## Key endpoints (backend)
