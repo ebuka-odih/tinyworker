@@ -12,7 +12,7 @@ It helps users:
 
 ## Repo structure
 
-- `./frontend/` — Frontend (Opportunity Agent UI, Vercel target)
+- `./web/` — Frontend (Opportunity Agent UI, Vercel target)
 - `./backend/` — Backend API (NestJS + Postgres + Prisma)
 
 ## Local development
@@ -20,7 +20,7 @@ It helps users:
 ### Full stack (recommended)
 
 ```bash
-npm --prefix frontend install
+npm --prefix web install
 npm --prefix backend install
 npm run dev
 ```
@@ -31,10 +31,10 @@ npm run dev
 
 ### Frontend only
 
-See: [`frontend/.env.example`](frontend/.env.example)
+See: [`web/.env.example`](web/.env.example)
 
 ```bash
-cd frontend
+cd web
 npm install
 npm run dev
 ```
@@ -54,7 +54,7 @@ npm run start:dev
 
 ## Deployment folder targets
 
-- Vercel frontend project root: `frontend/`
+- Vercel frontend project root: `web/`
 - Backend project root: `backend/`
 
 ## Key endpoints (backend)
@@ -73,6 +73,7 @@ npm run start:dev
 - `POST /api/tinyfish/run-async`
 - `POST /api/tinyfish/run-batch`
 - `GET /api/tinyfish/runs/:runId`
+- `GET /api/opportunities/search/jobs`
 - `GET /api/opportunities`
 - `POST /api/opportunities/import`
 - `GET /api/applications`

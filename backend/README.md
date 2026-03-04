@@ -37,6 +37,7 @@ npm run start:dev
 - POST `/api/tinyfish/run-async`
 - POST `/api/tinyfish/run-batch`
 - GET `/api/tinyfish/runs/:runId`
+- GET `/api/opportunities/search/jobs` (Valyu-backed public job search)
 - GET `/api/opportunities`
 - POST `/api/opportunities/import`
 - GET `/api/applications`

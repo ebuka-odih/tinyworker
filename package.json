@@ -2,20 +2,20 @@
   "name": "tinyworker",
   "private": true,
   "scripts": {
-    "install:frontend": "npm --prefix frontend install --include=dev",
+    "install:frontend": "npm --prefix web install --include=dev",
     "install:backend": "npm --prefix backend install --include=dev",
     "install:all": "npm run install:frontend && npm run install:backend",
     "prebuild": "npm run install:all",
-    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:frontend": "npm --prefix web run dev",
     "dev:client": "npm run dev:frontend",
     "dev:backend": "npm --prefix backend run start:dev",
     "dev": "bash -lc 'npm run dev:backend & npm run dev:frontend'",
-    "build:frontend": "npm --prefix frontend run build",
+    "build:frontend": "npm --prefix web run build",
     "build:backend": "npm --prefix backend run build",
     "build": "npm run build:frontend && npm run build:backend",
-    "preview:frontend": "npm --prefix frontend run preview",
+    "preview:frontend": "npm --prefix web run preview",
     "start:backend": "npm --prefix backend run start:prod",
     "start": "npm run start:backend",
-    "lint:frontend": "npm --prefix frontend run lint"
+    "lint:frontend": "npm --prefix web run lint"
   }
 }
