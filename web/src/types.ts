@@ -4,6 +4,9 @@ export enum SearchType {
   VISA = 'visa',
 }
 
+export type TimelineSeverity = 'info' | 'success' | 'warning' | 'error';
+export type TimelineStatus = 'queued' | 'running' | 'completed' | 'failed';
+
 export interface SearchSession {
   id: string;
   type: SearchType;
@@ -21,6 +24,9 @@ export interface TimelineItem {
   title: string;
   description: string;
   details?: string;
+  detailLines?: string[];
+  status?: TimelineStatus;
+  severity?: TimelineSeverity;
   isExpanded?: boolean;
 }
 
@@ -35,4 +41,6 @@ export interface SearchResult {
   link: string;
   status: 'new' | 'shortlisted' | 'saved' | 'applied' | 'needs-info';
   isSuspicious?: boolean;
+  snippet?: string;
+  relevance?: number;
 }

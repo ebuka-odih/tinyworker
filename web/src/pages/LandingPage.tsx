@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Briefcase, GraduationCap, FileText, ArrowRight, Clock } from 'lucide-react';
+import { Briefcase, GraduationCap, FileText, ArrowRight, Clock, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 
 const searchTypes = [
@@ -35,13 +35,6 @@ const searchTypes = [
 
 export function LandingPage() {
   const navigate = useNavigate();
-  const [selected, setSelected] = React.useState<string | null>(null);
-
-  const handleStart = () => {
-    if (selected) {
-      navigate(`/intake/${selected}`);
-    }
-  };
 
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -62,23 +55,18 @@ export function LandingPage() {
           Find verified opportunities faster.
         </h1>
         <p className="text-lg text-neutral-500 max-w-lg mx-auto">
-          Search jobs, scholarships, and visa requirements with AI-driven precision and transparency.
+          Use a guided search flow to set your goals, filters, and profile context before running a search.
         </p>
       </motion.div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl mb-12">
         {searchTypes.map((type, index) => (
-          <motion.button
+          <motion.div
             key={type.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: index * 0.1 }}
-            onClick={() => setSelected(type.id)}
-            className={`group relative flex flex-col items-start p-8 rounded-2xl border-2 text-left transition-all duration-300 bg-white ${
-              selected === type.id 
-                ? 'border-neutral-900 shadow-xl shadow-neutral-100 ring-4 ring-neutral-50' 
-                : `border-neutral-100 ${type.hoverColor} hover:shadow-lg`
-            }`}
+            className={`group relative flex flex-col items-start p-8 rounded-2xl border-2 text-left transition-all duration-300 bg-white border-neutral-100 ${type.hoverColor} hover:shadow-lg`}
           >
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-6 transition-transform group-hover:scale-110 ${type.color}`}>
               <type.icon size={24} />
@@ -91,15 +79,7 @@ export function LandingPage() {
               <Clock size={14} />
               Estimated time: {type.time}
             </div>
-            
-            {selected === type.id && (
-              <div className="absolute top-4 right-4 text-neutral-900">
-                <div className="w-6 h-6 rounded-full bg-neutral-900 flex items-center justify-center text-white">
-                  <ArrowRight size={14} />
-                </div>
-              </div>
-            )}
-          </motion.button>
+          </motion.div>
         ))}
       </div>
 
@@ -109,16 +89,15 @@ export function LandingPage() {
         transition={{ delay: 0.5 }}
         className="flex flex-col items-center gap-4 w-full max-w-xs md:max-w-none"
       >
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-100">
+          <Sparkles size={12} />
+          New Search now starts on a dedicated flow page
+        </div>
         <button
-          onClick={handleStart}
-          disabled={!selected}
-          className={`w-full md:w-auto px-10 py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 min-h-[56px] ${
-            selected 
-              ? 'bg-neutral-900 text-white hover:bg-black shadow-xl shadow-neutral-200 active:scale-95' 
-              : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
-          }`}
+          onClick={() => navigate('/new-search')}
+          className="w-full md:w-auto px-10 py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 min-h-[56px] bg-neutral-900 text-white hover:bg-black shadow-xl shadow-neutral-200 active:scale-95"
         >
-          Start Search
+          Go to New Search
           <ArrowRight size={20} />
         </button>
         

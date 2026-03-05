@@ -1,10 +1,11 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, History, Settings, User, Menu, X } from 'lucide-react';
+import { History, User, Menu, X } from 'lucide-react';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const isNewSearchRoute = location.pathname.startsWith('/new-search') || location.pathname.startsWith('/intake/');
   
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans">
@@ -20,8 +21,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-6">
             <Link 
-              to="/" 
-              className={`text-sm font-medium transition-colors hover:text-neutral-900 ${location.pathname === '/' ? 'text-neutral-900' : 'text-neutral-500'}`}
+              to="/new-search"
+              className={`text-sm font-medium transition-colors hover:text-neutral-900 ${isNewSearchRoute ? 'text-neutral-900' : 'text-neutral-500'}`}
             >
               New Search
             </Link>
@@ -51,9 +52,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {isMenuOpen && (
           <div className="md:hidden bg-white border-t border-neutral-100 p-4 space-y-4 shadow-xl animate-in slide-in-from-top duration-200">
             <Link 
-              to="/" 
+              to="/new-search"
               onClick={() => setIsMenuOpen(false)}
-              className={`block text-lg font-bold p-2 rounded-xl ${location.pathname === '/' ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'}`}
+              className={`block text-lg font-bold p-2 rounded-xl ${isNewSearchRoute ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'}`}
             >
               New Search
             </Link>

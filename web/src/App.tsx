@@ -12,6 +12,7 @@ export default function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<LandingPage />} />
+          <Route path="/new-search" element={<IntakePage />} />
           <Route path="/intake/:type" element={<IntakePage />} />
           <Route path="/session/:id" element={<SessionPage />} />
           <Route path="/report/:id" element={<ReportPage />} />
