@@ -308,6 +308,7 @@ export function SessionPage() {
   const [resultFitFilter, setResultFitFilter] = React.useState<ResultFitFilter>('all');
   const [resultStageFilter, setResultStageFilter] = React.useState<ResultStageFilter>('all');
   const [resultSourceFilter, setResultSourceFilter] = React.useState<string>('all');
+  const [isResultFiltersOpen, setIsResultFiltersOpen] = React.useState(false);
 
   const streamRef = React.useRef<{ close: () => void } | null>(null);
   const snapshotPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1076,6 +1077,14 @@ export function SessionPage() {
     [tabResults],
   );
 
+  const activeResultFilterCount = React.useMemo(() => {
+    let count = 0;
+    if (resultFitFilter !== 'all') count += 1;
+    if (resultStageFilter !== 'all') count += 1;
+    if (resultSourceFilter !== 'all') count += 1;
+    return count;
+  }, [resultFitFilter, resultSourceFilter, resultStageFilter]);
+
   React.useEffect(() => {
     if (resultSourceFilter === 'all') return;
     if (availableResultSources.includes(resultSourceFilter)) return;
@@ -1452,17 +1461,29 @@ export function SessionPage() {
           </div>
 
           {isMobileActivityCollapsed ? (
-            <div className="lg:hidden rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-500">Activity hidden</p>
-                  <p className="mt-1 text-xs leading-5 text-neutral-500">
-                    Live updates are still running. Show the feed any time if you want to inspect the search timeline.
-                  </p>
+            <div className="lg:hidden rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-neutral-500">Activity hidden</p>
+                  <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                    {hiddenTimelineCount} update{hiddenTimelineCount === 1 ? '' : 's'}
+                  </span>
                 </div>
-                <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">
-                  {hiddenTimelineCount} update{hiddenTimelineCount === 1 ? '' : 's'}
-                </span>
+
+                <p className="text-sm leading-6 text-neutral-500">
+                  Live updates are still running. Open the feed any time to inspect the search timeline.
+                </p>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-medium text-neutral-400">Job cards stay updated while this is hidden.</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsMobileActivityCollapsed(false)}
+                    className="shrink-0 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-700 transition-all hover:border-neutral-300 hover:text-neutral-900"
+                  >
+                    Show feed
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -1559,9 +1580,31 @@ export function SessionPage() {
                 </button>
               ))}
             </div>
-            <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">{visibleResults.length} Found</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsResultFiltersOpen((prev) => !prev)}
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-all ${
+                  isResultFiltersOpen || activeResultFilterCount > 0
+                    ? 'border-neutral-900 bg-neutral-900 text-white'
+                    : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'
+                }`}
+                aria-expanded={isResultFiltersOpen}
+                aria-label={isResultFiltersOpen ? 'Hide result filters' : 'Show result filters'}
+              >
+                <Filter size={13} />
+                <span className="hidden sm:inline">{isResultFiltersOpen ? 'Hide filters' : 'Filters'}</span>
+                {activeResultFilterCount > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold leading-none ${isResultFiltersOpen ? 'bg-white text-neutral-900' : 'bg-neutral-100 text-neutral-700'}`}>
+                    {activeResultFilterCount}
+                  </span>
+                )}
+              </button>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">{visibleResults.length} Found</span>
+            </div>
           </div>
 
+          {isResultFiltersOpen ? (
           <div className="rounded-xl border border-neutral-200 bg-white p-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
@@ -1630,6 +1673,7 @@ export function SessionPage() {
               </label>
             </div>
           </div>
+          ) : null}
 
           <div className="space-y-4">
             <AnimatePresence initial={false}>
