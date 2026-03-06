@@ -33,6 +33,7 @@ import {
 } from '../services/searchSessionStore';
 import { useAuth } from '../auth/AuthContext';
 import { JobDetailsModal } from '../components/JobDetailsModal';
+import { listSavedOpportunities, saveJobOpportunity } from '../services/opportunitiesApi';
 
 type SessionLocationState = {
   formData?: JobSearchIntakeData;
@@ -48,8 +49,6 @@ const COUNTRY_CODES: Record<string, string> = {
   'United States': 'US',
   Netherlands: 'NL',
 };
-
-const MAX_SEARCH_RUNTIME_MS = 90_000;
 
 const SNAPSHOT_POLL_INTERVAL_MS = 5_000;
 
@@ -147,12 +146,33 @@ function mergeSearchResult(existing: SearchResult | undefined, incoming: SearchR
 }
 
 function sortSearchResults(items: SearchResult[]) {
+  const queuePriority = (status: JobQueueStatus) => {
+    if (status === 'ready' || status === 'verified') return 0;
+    if (status === 'extracting') return 1;
+    if (status === 'queued') return 2;
+    return 3;
+  };
+
   return [...items].sort((a, b) => {
+    const statusDelta = queuePriority(a.queueStatus) - queuePriority(b.queueStatus);
+    if (statusDelta !== 0) return statusDelta;
+
     const ap = typeof a.queuePosition === 'number' ? a.queuePosition : Number.MAX_SAFE_INTEGER;
     const bp = typeof b.queuePosition === 'number' ? b.queuePosition : Number.MAX_SAFE_INTEGER;
     if (ap !== bp) return ap - bp;
     return (b.relevance || 0) - (a.relevance || 0);
   });
+}
+
+function resultIdentity(result: Pick<SearchResult, 'link' | 'title' | 'organization' | 'location'>) {
+  const link = String(result.link || '').trim().toLowerCase();
+  if (link) return `link:${link}`;
+  return [
+    'job',
+    String(result.title || '').trim().toLowerCase(),
+    String(result.organization || '').trim().toLowerCase(),
+    String(result.location || '').trim().toLowerCase(),
+  ].join('::');
 }
 
 export function SessionPage() {
@@ -189,6 +209,8 @@ export function SessionPage() {
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
   const [startedAtMs, setStartedAtMs] = React.useState<number | null>(null);
   const [isHydrated, setIsHydrated] = React.useState(false);
+  const [savedJobKeys, setSavedJobKeys] = React.useState<Set<string>>(new Set());
+  const [savingJobIds, setSavingJobIds] = React.useState<Set<string>>(new Set());
 
   const streamRef = React.useRef<{ close: () => void } | null>(null);
   const snapshotPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -197,7 +219,6 @@ export function SessionPage() {
   const isCompletedRef = React.useRef(false);
   const eventQueueRef = React.useRef<SearchRunEvent[]>([]);
   const lastSequenceRef = React.useRef(0);
-  const liveWindowTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasStartedRef = React.useRef(false);
   const lastSnapshotStatusRef = React.useRef<string | null>(null);
   const lastSnapshotCountsRef = React.useRef({ ready: 0, failed: 0, queued: 0 });
@@ -213,13 +234,6 @@ export function SessionPage() {
     streamRef.current = null;
   }, []);
 
-  const clearLiveWindowTimeout = React.useCallback(() => {
-    if (liveWindowTimeoutRef.current) {
-      clearTimeout(liveWindowTimeoutRef.current);
-      liveWindowTimeoutRef.current = null;
-    }
-  }, []);
-
   const clearSnapshotPolling = React.useCallback(() => {
     if (snapshotPollRef.current) {
       clearInterval(snapshotPollRef.current);
@@ -230,9 +244,8 @@ export function SessionPage() {
 
   const clearRunActivity = React.useCallback(() => {
     closeStream();
-    clearLiveWindowTimeout();
     clearSnapshotPolling();
-  }, [clearLiveWindowTimeout, clearSnapshotPolling, closeStream]);
+  }, [clearSnapshotPolling, closeStream]);
 
   const redirectToAuth = React.useCallback(() => {
     clearRunActivity();
@@ -264,6 +277,14 @@ export function SessionPage() {
     });
   }, []);
 
+  const markResultStatus = React.useCallback((resultId: string, nextStatus: SearchResult['status']) => {
+    setResults((prev) =>
+      sortSearchResults(
+        prev.map((item) => (item.id === resultId ? { ...item, status: nextStatus } : item)),
+      ),
+    );
+  }, []);
+
   const finalizeRunState = React.useCallback(
     (nextStatus: 'completed' | 'error', phase: SearchPhase, title: string, description: string, severity: TimelineSeverity) => {
       if (!isCompletedRef.current) {
@@ -281,11 +302,16 @@ export function SessionPage() {
     (snapshot: SearchRunSnapshot | null) => {
       if (!snapshot) return;
       const snapshotResults = Array.isArray(snapshot.results) ? snapshot.results : [];
-      setResults((prev) =>
-        sortSearchResults(
-          snapshotResults.map((item) => mergeSearchResult(prev.find((existing) => existing.id === item.id), item)),
-        ),
-      );
+      if (snapshotResults.length) {
+        setResults((prev) => {
+          const next = new Map<string, SearchResult>(prev.map((item) => [item.id, item]));
+          snapshotResults.forEach((item) => {
+            const existing = next.get(item.id);
+            next.set(item.id, mergeSearchResult(existing, item));
+          });
+          return sortSearchResults(Array.from(next.values()));
+        });
+      }
       setCacheState(snapshot.cache || null);
       lastSequenceRef.current = Math.max(lastSequenceRef.current, Number(snapshot.lastSequence || 0));
 
@@ -344,6 +370,7 @@ export function SessionPage() {
       lastSequenceRef.current = Math.max(lastSequenceRef.current, Number(event.sequence || 0));
 
       if (event.type === 'run_started') {
+        clearSnapshotPolling();
         setSearchPhase('streaming');
         addTimelineEvent('Initializing search agent', 'Preparing verified sources and extraction queue.', 'info', 'running');
         return;
@@ -408,6 +435,17 @@ export function SessionPage() {
 
       if (event.type === 'run_completed') {
         setCacheState((prev) => (prev ? { ...prev, refreshing: false } : null));
+        if (event.runId) {
+          void getJobSearchRunSnapshot(event.runId, accessToken)
+            .then((snapshot) => {
+              applySnapshot(snapshot);
+              finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
+            })
+            .catch(() => {
+              finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
+            });
+          return;
+        }
         finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
         return;
       }
@@ -425,7 +463,7 @@ export function SessionPage() {
         finalizeRunState('error', 'error', isTimeout ? 'Run timeout' : 'Search error', details, isTimeout ? 'warning' : 'error');
       }
     },
-    [addTimelineEvent, finalizeRunState, upsertResult],
+    [accessToken, addTimelineEvent, applySnapshot, clearSnapshotPolling, finalizeRunState, upsertResult],
   );
 
   const flushQueuedEvents = React.useCallback(() => {
@@ -503,8 +541,8 @@ export function SessionPage() {
       setSearchPhase('background-monitoring');
       if (!suppressTimeline) {
         addTimelineEvent(
-          'Live view timed out',
-          `Live updates paused after ${Math.round(MAX_SEARCH_RUNTIME_MS / 1000)} seconds. Search continues in background and results will refresh automatically.`,
+          'Live stream interrupted',
+          'Live updates paused. Search continues in the background and results will keep refreshing automatically.',
           'warning',
           'running',
         );
@@ -512,24 +550,6 @@ export function SessionPage() {
       startSnapshotPolling(searchRunId);
     },
     [addTimelineEvent, closeStream, startSnapshotPolling],
-  );
-
-  const scheduleLiveWindowTimeout = React.useCallback(
-    (searchRunId: string, runStartedAtMs: number) => {
-      clearLiveWindowTimeout();
-      const elapsedMs = Math.max(0, Date.now() - runStartedAtMs);
-      const remainingMs = MAX_SEARCH_RUNTIME_MS - elapsedMs;
-      if (remainingMs <= 0) {
-        enterBackgroundMonitoring(searchRunId);
-        return;
-      }
-
-      liveWindowTimeoutRef.current = setTimeout(() => {
-        if (isCompletedRef.current) return;
-        enterBackgroundMonitoring(searchRunId);
-      }, remainingMs);
-    },
-    [clearLiveWindowTimeout, enterBackgroundMonitoring],
   );
 
   const handleStartFailure = React.useCallback(
@@ -666,6 +686,53 @@ export function SessionPage() {
     isPausedRef.current = status === 'paused';
   }, [status]);
 
+  React.useEffect(() => {
+    if (!accessToken) {
+      setSavedJobKeys(new Set());
+      return;
+    }
+
+    let cancelled = false;
+
+    const restoreSavedJobs = async () => {
+      try {
+        const saved = await listSavedOpportunities(accessToken, 'job');
+        if (cancelled) return;
+        const nextKeys = new Set(
+          saved.map((item) =>
+            resultIdentity({
+              link: item.link || '',
+              title: item.title,
+              organization: item.organization || '',
+              location: item.location || '',
+            }),
+          ),
+        );
+        setSavedJobKeys(nextKeys);
+        setResults((prev) =>
+          sortSearchResults(
+            prev.map((item) =>
+              nextKeys.has(resultIdentity(item)) && item.status !== 'shortlisted'
+                ? { ...item, status: 'saved' }
+                : item,
+            ),
+          ),
+        );
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof ApiUnauthorizedError) {
+          redirectToAuth();
+        }
+      }
+    };
+
+    void restoreSavedJobs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, redirectToAuth]);
+
   const startNewRun = React.useCallback(async () => {
     isCompletedRef.current = false;
     eventQueueRef.current = [];
@@ -690,7 +757,6 @@ export function SessionPage() {
       });
       setRunId(started.runId);
       connectToRunStream(started.runId);
-      scheduleLiveWindowTimeout(started.runId, now);
     } catch (error) {
       handleStartFailure(error);
     }
@@ -700,7 +766,6 @@ export function SessionPage() {
     connectToRunStream,
     countryCode,
     handleStartFailure,
-    scheduleLiveWindowTimeout,
     searchQuery,
     sessionFormData.remote,
     sessionFormData.visaSponsorship,
@@ -747,7 +812,7 @@ export function SessionPage() {
         return;
       }
 
-      if (searchPhase === 'background-monitoring' || Date.now() - effectiveStartedAtMs >= MAX_SEARCH_RUNTIME_MS) {
+      if (searchPhase === 'background-monitoring') {
         enterBackgroundMonitoring(runId, true);
         return;
       }
@@ -755,7 +820,6 @@ export function SessionPage() {
       setStatus('running');
       setSearchPhase('streaming');
       connectToRunStream(runId);
-      scheduleLiveWindowTimeout(runId, effectiveStartedAtMs);
       addTimelineEvent('Restored search session', 'Reconnected to the existing search after refresh.', 'info', 'running');
     } catch (error) {
       if (error instanceof ApiUnauthorizedError) {
@@ -781,7 +845,6 @@ export function SessionPage() {
     redirectToAuth,
     results.length,
     runId,
-    scheduleLiveWindowTimeout,
     searchPhase,
     startedAtMs,
     status,
@@ -851,6 +914,51 @@ export function SessionPage() {
     }
     finalizeRunState('completed', 'completed', 'Search stopped', 'Search session ended manually.', 'warning');
   };
+
+  const handleSaveJob = React.useCallback(
+    async (result: SearchResult, nextStatus: 'saved' | 'shortlisted' = 'saved') => {
+      if (savingJobIds.has(result.id)) return;
+
+      const key = resultIdentity(result);
+      if (savedJobKeys.has(key)) {
+        markResultStatus(result.id, nextStatus);
+        addTimelineEvent('Already saved', `${result.title} is already in your profile.`, 'info', 'completed');
+        return;
+      }
+
+      setSavingJobIds((prev) => new Set(prev).add(result.id));
+      try {
+        const saved = await saveJobOpportunity(accessToken, result);
+        const savedKey = resultIdentity({
+          link: saved.link || result.link,
+          title: saved.title || result.title,
+          organization: saved.organization || result.organization,
+          location: saved.location || result.location,
+        });
+        setSavedJobKeys((prev) => {
+          const next = new Set(prev);
+          next.add(savedKey);
+          return next;
+        });
+        markResultStatus(result.id, nextStatus);
+        addTimelineEvent('Saved to profile', `${result.title} is now available in your saved opportunities.`, 'success', 'completed');
+      } catch (error) {
+        if (error instanceof ApiUnauthorizedError) {
+          redirectToAuth();
+          return;
+        }
+        const message = error instanceof Error ? error.message : 'Could not save this job right now.';
+        addTimelineEvent('Save failed', message, 'error', 'failed');
+      } finally {
+        setSavingJobIds((prev) => {
+          const next = new Set(prev);
+          next.delete(result.id);
+          return next;
+        });
+      }
+    },
+    [accessToken, addTimelineEvent, markResultStatus, redirectToAuth, savedJobKeys, savingJobIds],
+  );
 
   const isSearching = (status === 'running' || status === 'paused') && !isCompletedRef.current;
 
@@ -1151,13 +1259,17 @@ export function SessionPage() {
                   <p className="text-xs text-neutral-500 mt-1">Try switching to “All” to view the current results.</p>
                 </div>
               ) : (
-                visibleResults.map((result) => (
-                  <motion.div
-                    key={result.id}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="bg-white border border-neutral-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all group"
-                  >
+                visibleResults.map((result) => {
+                  const isSaved = savedJobKeys.has(resultIdentity(result));
+                  const isSaving = savingJobIds.has(result.id);
+
+                  return (
+                    <motion.div
+                      key={result.id}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="bg-white border border-neutral-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all group"
+                    >
                     <div className="flex justify-between items-start mb-3 gap-3">
                       <div>
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -1193,10 +1305,22 @@ export function SessionPage() {
 
                     <div className="flex items-center justify-between pt-4 border-t border-neutral-50 gap-3">
                       <div className="flex items-center gap-1">
-                        <button className="p-2 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-all" title="Save">
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveJob(result, 'saved')}
+                          disabled={isSaving}
+                          className={`p-2 rounded-lg transition-all ${isSaved ? 'text-neutral-900 bg-neutral-100' : 'text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100'} ${isSaving ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          title={isSaved ? 'Saved to profile' : 'Save to profile'}
+                        >
                           <Bookmark size={16} />
                         </button>
-                        <button className="p-2 text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Shortlist">
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveJob(result, 'shortlisted')}
+                          disabled={isSaving}
+                          className={`p-2 rounded-lg transition-all ${result.status === 'shortlisted' ? 'text-emerald-700 bg-emerald-50' : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'} ${isSaving ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          title={result.status === 'shortlisted' ? 'Shortlisted and saved' : 'Shortlist and save'}
+                        >
                           <CheckCircle2 size={16} />
                         </button>
                         <button
@@ -1217,8 +1341,9 @@ export function SessionPage() {
                         <ExternalLink size={12} />
                       </a>
                     </div>
-                  </motion.div>
-                ))
+                    </motion.div>
+                  );
+                })
               )}
             </AnimatePresence>
           </div>

@@ -73,3 +73,19 @@ export interface SearchResult {
   responsibilities?: string[];
   benefits?: string[];
 }
+
+export interface SavedOpportunity {
+  id: string;
+  type: 'job' | 'scholarship' | 'visa';
+  title: string;
+  organization?: string | null;
+  location?: string | null;
+  description?: string | null;
+  requirements?: string[];
+  link?: string | null;
+  deadline?: string | null;
+  matchScore?: number | null;
+  source?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { PrismaService } from '../prisma/prisma.service'
+import { rankSearchRunResults } from './job-search-candidate.utils'
 
 export type SearchRunStatus = 'running' | 'completed' | 'failed' | 'stopped'
 export type SearchRunEventType =
@@ -210,22 +211,21 @@ export class JobSearchRunStore {
     const existing = run.results.get(result.id)
     const next = this.mergeResult(existing, result)
     run.results.set(result.id, next)
+    this.reRankRunResults(run)
 
     const values = Array.from(run.results.values())
-    const totalQueued = values.filter((item) => item.queueStatus === 'queued' || item.queueStatus === 'extracting').length
-    const totalReady = values.filter((item) => item.queueStatus === 'ready' || item.queueStatus === 'verified').length
-    const totalFailed = values.filter((item) => item.queueStatus === 'failed').length
+    const counts = this.countResults(values)
 
     await this.prisma.jobSearchRun.update({
       where: { id: runId },
       data: {
-        totalQueued,
-        totalReady,
-        totalFailed,
+        totalQueued: counts.queued,
+        totalReady: counts.ready,
+        totalFailed: counts.failed,
       },
     })
 
-    return next
+    return run.results.get(result.id) || next
   }
 
   async appendEvent(runId: string, type: SearchRunEventType, payload?: Record<string, any>): Promise<SearchRunEvent | null> {
@@ -332,6 +332,8 @@ export class JobSearchRunStore {
     if (!persisted) return null
 
     const events = await this.getEventsSince(runId, userId, 0)
+    const results = this.reconstructResultsFromEvents(events)
+    const counts = this.countResults(results)
     return {
       runId: persisted.id,
       query: persisted.query,
@@ -342,13 +344,9 @@ export class JobSearchRunStore {
       completedAt: persisted.completedAt?.toISOString(),
       stoppedAt: persisted.stoppedAt?.toISOString(),
       lastSequence: persisted.lastSequence,
-      counts: {
-        queued: persisted.totalQueued,
-        ready: persisted.totalReady,
-        failed: persisted.totalFailed,
-      },
+      counts,
       cache: this.extractCacheStateFromEvents(events, persisted.status as SearchRunStatus),
-      results: [],
+      results,
       events,
     }
   }
@@ -358,7 +356,9 @@ export class JobSearchRunStore {
   }
 
   private toSnapshot(run: RunState): Record<string, any> {
+    this.reRankRunResults(run)
     const values = Array.from(run.results.values())
+    const counts = this.countResults(values)
     return {
       runId: run.id,
       query: run.query,
@@ -369,20 +369,50 @@ export class JobSearchRunStore {
       completedAt: run.completedAt,
       stoppedAt: run.stoppedAt,
       lastSequence: run.nextSequence - 1,
-      counts: {
-        queued: values.filter((item) => item.queueStatus === 'queued' || item.queueStatus === 'extracting').length,
-        ready: values.filter((item) => item.queueStatus === 'ready' || item.queueStatus === 'verified').length,
-        failed: values.filter((item) => item.queueStatus === 'failed').length,
-      },
+      counts,
       cache: run.cache,
-      results: values.sort((a, b) => {
-        const ap = typeof a.queuePosition === 'number' ? a.queuePosition : Number.MAX_SAFE_INTEGER
-        const bp = typeof b.queuePosition === 'number' ? b.queuePosition : Number.MAX_SAFE_INTEGER
-        if (ap !== bp) return ap - bp
-        return (b.relevance || 0) - (a.relevance || 0)
-      }),
+      results: values,
       events: run.events,
     }
+  }
+
+  private reconstructResultsFromEvents(events: SearchRunEvent[]): SearchRunResultItem[] {
+    const byId = new Map<string, SearchRunResultItem>()
+
+    for (const event of events) {
+      if (!['candidate_queued', 'candidate_extracting', 'candidate_ready', 'candidate_failed'].includes(event.type)) {
+        continue
+      }
+
+      const incoming = event.payload?.result as SearchRunResultItem | undefined
+      if (!incoming?.id) continue
+
+      const existing = byId.get(incoming.id)
+      byId.set(incoming.id, this.mergeResult(existing, incoming))
+    }
+
+    return rankSearchRunResults(Array.from(byId.values()))
+  }
+
+  private reRankRunResults(run: RunState): void {
+    const ranked = rankSearchRunResults(Array.from(run.results.values()))
+    run.results = new Map(ranked.map((item) => [item.id, item]))
+  }
+
+  private countResults(results: SearchRunResultItem[]): { queued: number; ready: number; failed: number } {
+    return results.reduce(
+      (acc, item) => {
+        if (item.queueStatus === 'failed') {
+          acc.failed += 1
+        } else if (item.queueStatus === 'queued' || item.queueStatus === 'extracting') {
+          acc.queued += 1
+        } else {
+          acc.ready += 1
+        }
+        return acc
+      },
+      { queued: 0, ready: 0, failed: 0 },
+    )
   }
 
   private pruneCompletedRuns(): void {

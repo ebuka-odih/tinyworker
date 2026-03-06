@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { normalizeDiscoveryQuery } from './job-search-candidate.utils'
+import { normalizeDiscoveryQuery, rankSearchRunResults } from './job-search-candidate.utils'
 import type { JobSourceScope } from './job-source-registry'
 import type { SearchRunResultItem } from './job-search-run.store'
 
@@ -86,7 +86,9 @@ export function buildJobSearchCacheIdentity(input: JobSearchCacheIdentityInput):
 }
 
 export function sliceCachedReadyResults(results: SearchRunResultItem[], maxNumResults: number): SearchRunResultItem[] {
-  return results.slice(0, Math.max(1, maxNumResults)).map((item, index) => ({
+  return rankSearchRunResults(results)
+    .slice(0, Math.max(1, maxNumResults))
+    .map((item, index) => ({
     ...item,
     queueStatus: item.queueStatus === 'ready' || item.queueStatus === 'verified' ? item.queueStatus : 'ready',
     queuePosition: index + 1,

@@ -7,6 +7,7 @@ import {
   deduplicateReadyResults,
   deriveCandidateJobDetails,
   extractedTitleLooksValid,
+  rankSearchRunResults,
 } from './job-search-candidate.utils'
 import {
   buildJobSearchCacheIdentity,
@@ -52,7 +53,7 @@ type QueryCacheHit = {
   results: SearchRunResultItem[]
 }
 
-const RUN_TIMEOUT_MS = Number(process.env.JOB_SEARCH_RUN_TIMEOUT_MS || 120_000)
+const RUN_TIMEOUT_MS = Number(process.env.JOB_SEARCH_RUN_TIMEOUT_MS || 0)
 const SUCCESS_QUERY_CACHE_TTL_MS = Number(process.env.JOB_QUERY_CACHE_TTL_MS || 6 * 60 * 60_000)
 const EMPTY_QUERY_CACHE_TTL_MS = Number(process.env.JOB_EMPTY_QUERY_CACHE_TTL_MS || 10 * 60_000)
 const EXTRACT_CACHE_TTL_MS = Number(process.env.JOB_EXTRACT_CACHE_TTL_MS || 24 * 60 * 60_000)
@@ -226,7 +227,7 @@ export class JobSearchOrchestrator {
     const workers = Array.from({ length: ENRICH_CONCURRENCY }).map(async () => {
       while (queue.length) {
         if (this.runStore.isStopRequested(runId) || didTimeOut) return
-        if (Date.now() - runStartedAt >= RUN_TIMEOUT_MS) {
+        if (RUN_TIMEOUT_MS > 0 && Date.now() - runStartedAt >= RUN_TIMEOUT_MS) {
           if (!didTimeOut) {
             didTimeOut = true
             await this.runStore.appendEvent(runId, 'run_error', {
@@ -298,10 +299,8 @@ export class JobSearchOrchestrator {
       return
     }
 
-    const finalResults = deduplicateReadyResults(readyItems)
-      .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+    const finalResults = rankSearchRunResults(deduplicateReadyResults(readyItems))
       .slice(0, input.maxNumResults)
-      .map((item, index) => ({ ...item, queuePosition: index + 1 }))
 
     if (finalResults.length > 0) {
       await this.writeQueryCache(cacheIdentity, input, finalResults, {

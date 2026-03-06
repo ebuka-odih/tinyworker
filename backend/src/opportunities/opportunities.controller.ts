@@ -201,25 +201,67 @@ export class OpportunitiesController {
       throw new BadRequestException({ error: 'Invalid input', details: e?.issues || e?.message })
     }
 
-    const created = await this.prisma.$transaction(
-      parsed.items.map((it) =>
-        this.prisma.opportunity.create({
-          data: {
-            userId,
-            type: it.type,
-            title: it.title,
-            organization: it.organization ?? null,
-            location: it.location ?? null,
-            description: it.description ?? null,
-            requirements: it.requirements ?? undefined,
-            link: it.link ?? null,
-            deadline: it.deadline ?? null,
-            matchScore: it.matchScore ?? null,
-            source: it.source ?? 'tinyfish',
-          },
-        }),
-      ),
-    )
+    const created = await this.prisma.$transaction(async (tx) => {
+      const saved = []
+
+      for (const it of parsed.items) {
+        const normalizedLink = String(it.link || '').trim() || null
+        const existing = await tx.opportunity.findFirst({
+          where: normalizedLink
+            ? {
+                userId,
+                type: it.type,
+                link: normalizedLink,
+              }
+            : {
+                userId,
+                type: it.type,
+                title: it.title,
+                organization: it.organization ?? null,
+                location: it.location ?? null,
+              },
+        })
+
+        if (existing) {
+          saved.push(
+            await tx.opportunity.update({
+              where: { id: existing.id },
+              data: {
+                organization: it.organization ?? existing.organization,
+                location: it.location ?? existing.location,
+                description: it.description ?? existing.description,
+                requirements: it.requirements ?? existing.requirements ?? undefined,
+                link: normalizedLink ?? existing.link,
+                deadline: it.deadline ?? existing.deadline,
+                matchScore: it.matchScore ?? existing.matchScore,
+                source: it.source ?? existing.source,
+              },
+            }),
+          )
+          continue
+        }
+
+        saved.push(
+          await tx.opportunity.create({
+            data: {
+              userId,
+              type: it.type,
+              title: it.title,
+              organization: it.organization ?? null,
+              location: it.location ?? null,
+              description: it.description ?? null,
+              requirements: it.requirements ?? undefined,
+              link: normalizedLink,
+              deadline: it.deadline ?? null,
+              matchScore: it.matchScore ?? null,
+              source: it.source ?? 'tinyfish',
+            },
+          }),
+        )
+      }
+
+      return saved
+    })
 
     return { ok: true, opportunities: created }
   }

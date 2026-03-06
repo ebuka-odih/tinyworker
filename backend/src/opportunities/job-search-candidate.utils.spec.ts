@@ -5,6 +5,7 @@ import {
   extractedTitleLooksValid,
   filterAndDeduplicateDiscoveredCandidates,
   normalizeDiscoveryQuery,
+  rankSearchRunResults,
 } from './job-search-candidate.utils'
 
 describe('job-search candidate utils', () => {
@@ -106,6 +107,54 @@ describe('job-search candidate utils', () => {
     expect(deduped).toHaveLength(1)
     expect(deduped[0]?.id).toBe('1')
     expect(deduped[0]?.sourceName).toBe('Indeed')
+  })
+
+  it('ranks richer ready results ahead of sparse ones and assigns relative fit tiers', () => {
+    const sparse: SearchRunResultItem = {
+      id: '1',
+      title: 'Backend Engineer',
+      organization: 'Acme',
+      location: 'Remote',
+      fitScore: 'Low',
+      tags: ['Indeed'],
+      link: 'https://www.indeed.com/viewjob?jk=abc123',
+      status: 'new',
+      sourceName: 'Indeed',
+      sourceDomain: 'indeed.com',
+      sourceType: 'job_board',
+      sourceVerified: false,
+      queueStatus: 'ready',
+      relevance: 0.95,
+      snippet: 'Work on backend systems.',
+    }
+
+    const rich: SearchRunResultItem = {
+      id: '2',
+      title: 'Platform Engineer',
+      organization: 'Acme',
+      location: 'Remote',
+      fitScore: 'Low',
+      tags: ['Greenhouse'],
+      link: 'https://boards.greenhouse.io/acme/jobs/123',
+      status: 'new',
+      sourceName: 'Greenhouse',
+      sourceDomain: 'greenhouse.io',
+      sourceType: 'ats',
+      sourceVerified: true,
+      queueStatus: 'ready',
+      relevance: 0.82,
+      snippet: 'Own platform services.',
+      salary: '$150k',
+      matchReason: 'Strong match for backend platform work.',
+      requirements: ['TypeScript', 'Distributed systems'],
+      responsibilities: ['Build platform APIs'],
+      benefits: ['Remote-first'],
+    }
+
+    const ranked = rankSearchRunResults([sparse, rich])
+    expect(ranked[0]?.id).toBe('2')
+    expect(ranked[0]?.fitScore).toBe('High')
+    expect(ranked[1]?.fitScore).toBe('Medium')
   })
 
   it('rejects extracted listing titles as final job details', () => {

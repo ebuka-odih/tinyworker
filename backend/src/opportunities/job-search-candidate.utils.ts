@@ -241,7 +241,11 @@ function resultIdentityKey(item: SearchRunResultItem): string {
   return `${title}::${organization}::${location || 'unknown'}`
 }
 
-function readyResultScore(item: SearchRunResultItem): number {
+function isReadyLike(status: SearchRunResultItem['queueStatus']): boolean {
+  return status === 'ready' || status === 'verified'
+}
+
+export function readyResultScore(item: SearchRunResultItem): number {
   const populatedFields = [
     item.title,
     item.organization,
@@ -260,8 +264,8 @@ function readyResultScore(item: SearchRunResultItem): number {
   return (
     populatedFields * 5 +
     (item.sourceVerified ? 3 : 0) +
-    (item.relevance || 0) +
-    (item.queueStatus === 'ready' || item.queueStatus === 'verified' ? 1 : 0)
+    (item.relevance || 0) * 4 +
+    (isReadyLike(item.queueStatus) ? 6 : item.queueStatus === 'extracting' ? 2 : item.queueStatus === 'queued' ? 1 : 0)
   )
 }
 
@@ -277,6 +281,33 @@ export function deduplicateReadyResults(results: SearchRunResultItem[]): SearchR
   }
 
   return Array.from(byIdentity.values())
+}
+
+function fitScoreForIndex(index: number, total: number): SearchRunResultItem['fitScore'] {
+  if (total <= 1) return 'High'
+  const highCutoff = Math.max(1, Math.ceil(total / 3))
+  const mediumCutoff = Math.max(highCutoff + (total > 2 ? 1 : 0), Math.ceil((total * 2) / 3))
+  if (index < highCutoff) return 'High'
+  if (index < mediumCutoff) return 'Medium'
+  return 'Low'
+}
+
+export function rankSearchRunResults(results: SearchRunResultItem[]): SearchRunResultItem[] {
+  const sorted = [...results].sort((a, b) => {
+    const scoreDelta = readyResultScore(b) - readyResultScore(a)
+    if (scoreDelta !== 0) return scoreDelta
+
+    const relevanceDelta = (b.relevance || 0) - (a.relevance || 0)
+    if (relevanceDelta !== 0) return relevanceDelta
+
+    return String(a.title || '').localeCompare(String(b.title || ''))
+  })
+
+  return sorted.map((item, index) => ({
+    ...item,
+    queuePosition: index + 1,
+    fitScore: fitScoreForIndex(index, sorted.length),
+  }))
 }
 
 export function extractedTitleLooksValid(title: string | undefined | null): boolean {

@@ -19,10 +19,24 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
 
   if (!job) return null;
 
+  const hasFullDetails = Boolean(
+    job.matchReason ||
+      job.salary ||
+      job.employmentType ||
+      job.workMode ||
+      job.postedDate ||
+      job.requirements?.length ||
+      job.responsibilities?.length ||
+      job.benefits?.length,
+  );
+  const sourceLink = job.link && job.link !== '#' ? job.link : null;
+  const canOpenSource = Boolean(sourceLink);
+  const isReady = job.queueStatus === 'ready' || job.queueStatus === 'verified';
+
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[1px] flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="w-full max-w-3xl bg-white rounded-2xl border border-neutral-200 shadow-2xl max-h-[90vh] overflow-hidden"
+        className="w-full max-w-3xl bg-white rounded-2xl border border-neutral-200 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 p-5 border-b border-neutral-100">
@@ -54,9 +68,20 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
         </div>
 
         <div className="p-5 overflow-y-auto max-h-[calc(90vh-160px)] space-y-5">
+          {!isReady && (
+            <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <h4 className="text-sm font-bold text-amber-900">Details still loading</h4>
+              <p className="mt-1 text-sm text-amber-800 leading-relaxed">
+                {job.queueStatus === 'failed'
+                  ? 'Full extraction did not complete for this job. You can still review the source listing and any partial details below.'
+                  : 'This job is still being processed. Available source details are shown now, and richer extracted fields will appear once the run finishes.'}
+              </p>
+            </section>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Detail label="Fit" value={`${job.fitScore} Fit`} />
-            <Detail label="Queue Status" value={job.queueStatus} />
+            <Detail label="Queue Status" value={queueLabel(job.queueStatus)} />
             <Detail label="Salary" value={job.salary || 'Not stated'} />
             <Detail label="Employment" value={job.employmentType || 'Not stated'} />
             <Detail label="Work Mode" value={job.workMode || 'Not stated'} />
@@ -77,25 +102,52 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
             </section>
           )}
 
-          <ListBlock title="Requirements" items={job.requirements} />
-          <ListBlock title="Responsibilities" items={job.responsibilities} />
-          <ListBlock title="Benefits" items={job.benefits} />
+          {!job.snippet && !hasFullDetails && (
+            <section className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
+              <h4 className="text-sm font-bold text-neutral-900">Limited details available</h4>
+              <p className="mt-1 text-sm text-neutral-600 leading-relaxed">
+                This card currently has source metadata only. Use the source listing button below to inspect the original posting.
+              </p>
+            </section>
+          )}
+
+          <ListBlock title="Requirements" items={job.requirements} emptyLabel="Requirements are not available for this job yet." />
+          <ListBlock
+            title="Responsibilities"
+            items={job.responsibilities}
+            emptyLabel="Responsibilities are not available for this job yet."
+          />
+          <ListBlock title="Benefits" items={job.benefits} emptyLabel="Benefits are not available for this job yet." />
         </div>
 
-        <div className="p-4 border-t border-neutral-100 flex justify-end">
-          <a
-            href={job.link || '#'}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-bold hover:bg-black transition-all"
-          >
-            Open Source Listing
-            <ExternalLink size={14} />
-          </a>
+        <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-neutral-100 p-4 flex justify-end">
+          {canOpenSource ? (
+            <a
+              href={sourceLink || '#'}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-[44px] items-center gap-1.5 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-bold hover:bg-black transition-all shadow-sm"
+            >
+              Open Source Listing
+              <ExternalLink size={14} />
+            </a>
+          ) : (
+            <span className="inline-flex min-h-[44px] items-center gap-1.5 px-4 py-2 rounded-lg bg-neutral-200 text-neutral-500 text-sm font-bold cursor-not-allowed">
+              Source link unavailable
+            </span>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function queueLabel(status: SearchResult['queueStatus']) {
+  if (status === 'queued') return 'Queued';
+  if (status === 'extracting') return 'Extracting';
+  if (status === 'verified') return 'Verified';
+  if (status === 'ready') return 'Ready';
+  return 'Failed';
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
@@ -107,8 +159,15 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ListBlock({ title, items }: { title: string; items?: string[] }) {
-  if (!items?.length) return null;
+function ListBlock({ title, items, emptyLabel }: { title: string; items?: string[]; emptyLabel: string }) {
+  if (!items?.length) {
+    return (
+      <section>
+        <h4 className="text-sm font-bold text-neutral-900 mb-2">{title}</h4>
+        <p className="text-sm text-neutral-500 leading-relaxed">{emptyLabel}</p>
+      </section>
+    );
+  }
   return (
     <section>
       <h4 className="text-sm font-bold text-neutral-900 mb-2">{title}</h4>

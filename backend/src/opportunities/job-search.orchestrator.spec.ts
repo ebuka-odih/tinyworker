@@ -187,7 +187,7 @@ describe('JobSearchOrchestrator timeout handling', () => {
   })
 
   it('marks a timed out run as failed without emitting run_completed', async () => {
-    process.env.JOB_SEARCH_RUN_TIMEOUT_MS = '0'
+    process.env.JOB_SEARCH_RUN_TIMEOUT_MS = '1'
     jest.resetModules()
 
     const { JobSearchOrchestrator } = require('./job-search.orchestrator')
@@ -205,19 +205,28 @@ describe('JobSearchOrchestrator timeout handling', () => {
     }
 
     const valyuSearch = {
-      discoverJobCandidates: jest.fn().mockResolvedValue([
-        {
-          id: 'candidate-1',
-          title: 'AI Engineer',
-          url: 'https://www.indeed.com/viewjob?jk=abc123',
-          snippet: 'Build AI systems.',
-          relevance: 0.9,
-          sourceName: 'Indeed',
-          sourceDomain: 'indeed.com',
-          sourceType: 'job_board',
-          sourceVerified: true,
-        },
-      ]),
+      discoverJobCandidates: jest.fn().mockImplementation(
+        async () =>
+          await new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve([
+                  {
+                    id: 'candidate-1',
+                    title: 'AI Engineer',
+                    url: 'https://www.indeed.com/viewjob?jk=abc123',
+                    snippet: 'Build AI systems.',
+                    relevance: 0.9,
+                    sourceName: 'Indeed',
+                    sourceDomain: 'indeed.com',
+                    sourceType: 'job_board',
+                    sourceVerified: true,
+                  },
+                ]),
+              5,
+            ),
+          ),
+      ),
     }
 
     const runStore = {
@@ -241,8 +250,7 @@ describe('JobSearchOrchestrator timeout handling', () => {
       sourceScope: 'global',
     })
 
-    await new Promise((resolve) => setImmediate(resolve))
-    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setTimeout(resolve, 20))
 
     expect(runStore.appendEvent).toHaveBeenCalledWith(
       'run-1',
@@ -255,5 +263,80 @@ describe('JobSearchOrchestrator timeout handling', () => {
       'run_completed',
       expect.anything(),
     )
+  })
+
+  it('does not apply a run timeout by default when the env is unset', async () => {
+    delete process.env.JOB_SEARCH_RUN_TIMEOUT_MS
+    jest.resetModules()
+
+    const { JobSearchOrchestrator } = require('./job-search.orchestrator')
+
+    const prisma = {
+      jobQueryCache: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+      },
+      jobExtractionCache: {
+        findUnique: jest.fn().mockResolvedValue({
+          payload: {
+            title: 'Senior Backend Engineer',
+            company: 'Acme',
+            location: 'Remote',
+            requirements: ['TypeScript'],
+          },
+          expiresAt: new Date(Date.now() + 60_000),
+        }),
+        upsert: jest.fn(),
+      },
+    }
+
+    const valyuSearch = {
+      discoverJobCandidates: jest.fn().mockResolvedValue([
+        {
+          id: 'candidate-1',
+          title: 'Senior Backend Engineer',
+          url: 'https://www.indeed.com/viewjob?jk=abc123',
+          snippet: 'Build APIs.',
+          relevance: 0.9,
+          sourceName: 'Indeed',
+          sourceDomain: 'indeed.com',
+          sourceType: 'job_board',
+          sourceVerified: true,
+        },
+      ]),
+    }
+
+    const runStore = {
+      createRun: jest.fn().mockResolvedValue({ runId: 'run-1' }),
+      findActiveRunByIntentHash: jest.fn().mockReturnValue(null),
+      upsertResult: jest.fn().mockImplementation(async (_runId, result) => result),
+      appendEvent: jest.fn().mockResolvedValue(null),
+      setStatus: jest.fn().mockResolvedValue(undefined),
+      setCacheState: jest.fn().mockResolvedValue(undefined),
+      isStopRequested: jest.fn().mockReturnValue(false),
+      requestStop: jest.fn().mockReturnValue(true),
+      getSnapshot: jest.fn(),
+      getEventsSince: jest.fn(),
+    }
+
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+
+    await orchestrator.startRun({
+      query: 'backend engineer',
+      maxNumResults: 1,
+      sourceScope: 'global',
+      userId: 'user-1',
+    })
+
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(runStore.appendEvent).not.toHaveBeenCalledWith(
+      'run-1',
+      'run_error',
+      expect.objectContaining({ code: 'timeout' }),
+    )
+    expect(runStore.setStatus).toHaveBeenCalledWith('run-1', 'completed')
   })
 })
