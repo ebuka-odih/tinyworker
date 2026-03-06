@@ -1,4 +1,5 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common'
+import { filterAndDeduplicateDiscoveredCandidates } from './job-search-candidate.utils'
 import { resolveSourceMeta } from './job-source-registry'
 
 type ValyuSearchResult = {
@@ -111,7 +112,7 @@ export class ValyuSearchService {
       })
     })
 
-    return candidates
+    return filterAndDeduplicateDiscoveredCandidates(candidates)
   }
 
   async searchJobs(input: JobSearchInput) {

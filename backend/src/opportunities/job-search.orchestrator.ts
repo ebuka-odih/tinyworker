@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { createHash } from 'node:crypto'
 import { runTinyfishWithFallback } from '../tinyfish/tinyfish.client'
+import {
+  canonicalizeJobUrl,
+  deduplicateReadyResults,
+  extractedTitleLooksValid,
+} from './job-search-candidate.utils'
 import { PrismaService } from '../prisma/prisma.service'
 import { getAllowedDomains, JobSourceScope } from './job-source-registry'
 import { JobSearchRunStore, SearchRunResultItem } from './job-search-run.store'
@@ -147,7 +152,7 @@ export class JobSearchOrchestrator {
       includedSources: allowedDomains,
     })
 
-    const uniqueCandidates = this.dedupeCandidates(discovered).slice(0, input.maxNumResults)
+    const uniqueCandidates = discovered.slice(0, input.maxNumResults)
     if (!uniqueCandidates.length) {
       await this.runStore.appendEvent(runId, 'run_completed', { total: 0, message: 'No opportunities found.' })
       await this.runStore.setStatus(runId, 'completed')
@@ -164,13 +169,20 @@ export class JobSearchOrchestrator {
 
     const readyItems: SearchRunResultItem[] = []
     let failedCount = 0
+    let didTimeOut = false
 
     const queue = [...uniqueCandidates]
     const workers = Array.from({ length: ENRICH_CONCURRENCY }).map(async () => {
       while (queue.length) {
-        if (this.runStore.isStopRequested(runId)) return
+        if (this.runStore.isStopRequested(runId) || didTimeOut) return
         if (Date.now() - runStartedAt >= RUN_TIMEOUT_MS) {
-          await this.runStore.appendEvent(runId, 'run_error', { message: 'Run timeout exceeded.' })
+          if (!didTimeOut) {
+            didTimeOut = true
+            await this.runStore.appendEvent(runId, 'run_error', {
+              code: 'timeout',
+              message: 'Run timeout exceeded.',
+            })
+          }
           return
         }
 
@@ -186,6 +198,7 @@ export class JobSearchOrchestrator {
 
         try {
           const readyItem = await this.enrichCandidate(candidate, input)
+          if (this.runStore.isStopRequested(runId) || didTimeOut) return
           await this.runStore.upsertResult(runId, readyItem)
           await this.runStore.appendEvent(runId, 'candidate_ready', { result: readyItem })
           readyItems.push(readyItem)
@@ -195,6 +208,7 @@ export class JobSearchOrchestrator {
             queued: Math.max(0, queue.length),
           })
         } catch (error: any) {
+          if (this.runStore.isStopRequested(runId) || didTimeOut) return
           failedCount += 1
           const message = error instanceof Error ? error.message : String(error)
           const failedItem: SearchRunResultItem = {
@@ -218,7 +232,12 @@ export class JobSearchOrchestrator {
       return
     }
 
-    const finalResults = readyItems
+    if (didTimeOut) {
+      await this.runStore.setStatus(runId, 'failed')
+      return
+    }
+
+    const finalResults = deduplicateReadyResults(readyItems)
       .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
       .slice(0, input.maxNumResults)
       .map((item, index) => ({ ...item, queuePosition: index + 1 }))
@@ -228,23 +247,8 @@ export class JobSearchOrchestrator {
     await this.runStore.appendEvent(runId, 'run_completed', {
       total: finalResults.length,
       failed: failedCount,
-      timeout: Date.now() - runStartedAt >= RUN_TIMEOUT_MS,
     })
     await this.runStore.setStatus(runId, 'completed')
-  }
-
-  private dedupeCandidates(candidates: ValyuDiscoveredCandidate[]): ValyuDiscoveredCandidate[] {
-    const seen = new Set<string>()
-    const out: ValyuDiscoveredCandidate[] = []
-    for (const candidate of candidates) {
-      const canonical = this.canonicalizeUrl(candidate.url)
-      if (!canonical) continue
-      const key = `${canonical}::${candidate.title.toLowerCase()}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      out.push(candidate)
-    }
-    return out
   }
 
   private buildQueuedItem(candidate: ValyuDiscoveredCandidate, input: StartSearchRunInput, queuePosition?: number): SearchRunResultItem {
@@ -274,9 +278,9 @@ export class JobSearchOrchestrator {
 
   private async enrichCandidate(candidate: ValyuDiscoveredCandidate, input: StartSearchRunInput): Promise<SearchRunResultItem> {
     const base = this.buildQueuedItem(candidate, input)
-    const canonicalUrl = this.canonicalizeUrl(candidate.url)
+    const canonicalUrl = canonicalizeJobUrl(candidate.url)
     if (!canonicalUrl) {
-      return { ...base, queueStatus: 'ready' }
+      throw new Error('Candidate URL could not be canonicalized for TinyFish extraction.')
     }
     const urlHash = this.hashKey(canonicalUrl)
 
@@ -285,14 +289,10 @@ export class JobSearchOrchestrator {
     })
     if (cached && cached.expiresAt.getTime() > Date.now()) {
       const payload = (cached.payload || {}) as TinyfishExtractedRecord
-      return {
-        ...base,
-        ...this.toResultFields(payload),
-        queueStatus: 'ready',
-      }
+      return this.buildReadyItem(base, payload)
     }
 
-    const extracted = await this.extractViaTinyfish(candidate.url, input.query)
+    const extracted = await this.extractViaTinyfish(canonicalUrl, input.query)
     await this.prisma.jobExtractionCache.upsert({
       where: { canonicalUrlHash: urlHash },
       update: {
@@ -312,11 +312,7 @@ export class JobSearchOrchestrator {
       },
     })
 
-    return {
-      ...base,
-      ...this.toResultFields(extracted),
-      queueStatus: 'ready',
-    }
+    return this.buildReadyItem(base, extracted)
   }
 
   private async extractViaTinyfish(url: string, query: string): Promise<TinyfishExtractedRecord> {
@@ -422,6 +418,31 @@ export class JobSearchOrchestrator {
     return out
   }
 
+  private buildReadyItem(base: SearchRunResultItem, payload: TinyfishExtractedRecord): SearchRunResultItem {
+    const detailFields = this.toResultFields(payload)
+    const title = this.safeText(detailFields.title)
+    if (!extractedTitleLooksValid(title)) {
+      throw new Error('TinyFish did not extract a valid job title.')
+    }
+
+    return {
+      ...base,
+      title,
+      organization: this.safeText(detailFields.organization),
+      location: this.safeText(detailFields.location),
+      snippet: this.safeText(detailFields.snippet),
+      salary: this.safeText(detailFields.salary),
+      employmentType: this.safeText(detailFields.employmentType),
+      workMode: this.safeText(detailFields.workMode),
+      postedDate: this.safeText(detailFields.postedDate),
+      matchReason: this.safeText(detailFields.matchReason),
+      requirements: detailFields.requirements || [],
+      responsibilities: detailFields.responsibilities || [],
+      benefits: detailFields.benefits || [],
+      queueStatus: 'ready',
+    }
+  }
+
   private safeText(value: unknown): string {
     if (typeof value === 'string') return value.trim()
     return ''
@@ -464,19 +485,6 @@ export class JobSearchOrchestrator {
         expiresAt: new Date(Date.now() + QUERY_CACHE_TTL_MS),
       },
     })
-  }
-
-  private canonicalizeUrl(url: string): string | null {
-    try {
-      const parsed = new URL(url)
-      parsed.hash = ''
-      ;['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid'].forEach((k) => {
-        parsed.searchParams.delete(k)
-      })
-      return parsed.toString()
-    } catch {
-      return null
-    }
   }
 
   private hashKey(value: string): string {

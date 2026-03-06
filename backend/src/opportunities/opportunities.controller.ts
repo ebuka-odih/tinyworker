@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { JwtAuthGuard } from '../auth/jwt.guard'
 import { PrismaService } from '../prisma/prisma.service'
 import { JobSearchOrchestrator } from './job-search.orchestrator'
+import { getAllowedDomains } from './job-source-registry'
 import { JobSearchRunStore, SearchRunEvent } from './job-search-run.store'
 import { ValyuSearchService } from './valyu-search.service'
 
@@ -70,7 +71,7 @@ export class OpportunitiesController {
       query: parsed.query,
       countryCode: parsed.countryCode?.toUpperCase(),
       maxNumResults: parsed.maxNumResults ?? 10,
-      includedSources: undefined,
+      includedSources: getAllowedDomains(parsed.sourceScope || 'global'),
     })
 
     return { ok: true, results }

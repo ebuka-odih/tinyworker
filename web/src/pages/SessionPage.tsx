@@ -16,9 +16,9 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { JobQueueStatus, SearchResult, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
-import { searchJobs } from '../services/jobSearchApi';
 import {
   SearchRunEvent,
+  SearchRunSnapshot,
   connectJobSearchRunStream,
   getJobSearchRunSnapshot,
   startJobSearchRun,
@@ -37,7 +37,7 @@ type SessionLocationState = {
   formData?: IntakeData;
 };
 
-type SearchPhase = 'initializing' | 'streaming' | 'completed' | 'error';
+type SearchPhase = 'initializing' | 'streaming' | 'background-monitoring' | 'completed' | 'error';
 
 const COUNTRY_CODES: Record<string, string> = {
   Germany: 'DE',
@@ -49,40 +49,7 @@ const COUNTRY_CODES: Record<string, string> = {
 
 const MAX_SEARCH_RUNTIME_MS = 90_000;
 
-const FALLBACK_RESULTS: SearchResult[] = [
-  {
-    id: 'fallback-1',
-    title: 'Senior Backend Engineer',
-    organization: 'TechFlow GmbH',
-    location: 'Berlin, Germany',
-    fitScore: 'High',
-    tags: ['Visa Sponsorship', 'Hybrid', 'Senior'],
-    link: '#',
-    status: 'new',
-    sourceName: 'LinkedIn Jobs',
-    sourceDomain: 'linkedin.com',
-    sourceType: 'job_board',
-    sourceVerified: true,
-    queueStatus: 'ready',
-    snippet: 'Fallback sample role for local preview when live data is unavailable.',
-  },
-  {
-    id: 'fallback-2',
-    title: 'Full Stack Developer',
-    organization: 'EduGlobal',
-    location: 'Munich, Germany',
-    fitScore: 'Medium',
-    tags: ['Visa Sponsorship', 'On-site', 'Mid-level'],
-    link: '#',
-    status: 'new',
-    sourceName: 'Indeed',
-    sourceDomain: 'indeed.com',
-    sourceType: 'job_board',
-    sourceVerified: true,
-    queueStatus: 'ready',
-    snippet: 'Fallback sample role for local preview when live data is unavailable.',
-  },
-];
+const SNAPSHOT_POLL_INTERVAL_MS = 5_000;
 
 function fitClass(fit: SearchResult['fitScore']) {
   if (fit === 'High') return 'bg-emerald-50 text-emerald-600';
@@ -104,19 +71,6 @@ function queueLabel(status: JobQueueStatus) {
   if (status === 'verified') return 'Verified';
   if (status === 'ready') return 'Ready';
   return 'Failed';
-}
-
-function sourceFromLink(link: string | undefined, fallback: string | undefined): { sourceName: string; sourceDomain: string } {
-  if (fallback) {
-    return { sourceName: fallback, sourceDomain: fallback.toLowerCase().replace(/\s+/g, '') };
-  }
-  if (!link) return { sourceName: 'Verified Web Source', sourceDomain: 'web' };
-  try {
-    const host = new URL(link).hostname.replace(/^www\./, '');
-    return { sourceName: host, sourceDomain: host };
-  } catch {
-    return { sourceName: 'Verified Web Source', sourceDomain: 'web' };
-  }
 }
 
 export function SessionPage() {
@@ -142,24 +96,50 @@ export function SessionPage() {
   const [results, setResults] = React.useState<SearchResult[]>([]);
   const [activeTab, setActiveTab] = React.useState<'all' | 'shortlisted' | 'saved'>('all');
   const [runId, setRunId] = React.useState<string | null>(null);
-  const [selectedJob, setSelectedJob] = React.useState<SearchResult | null>(null);
+  const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
 
   const streamRef = React.useRef<{ close: () => void } | null>(null);
+  const snapshotPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const snapshotRequestInFlightRef = React.useRef(false);
   const isPausedRef = React.useRef(false);
   const isCompletedRef = React.useRef(false);
   const eventQueueRef = React.useRef<SearchRunEvent[]>([]);
   const lastSequenceRef = React.useRef(0);
-  const runtimeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveWindowTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasStartedRef = React.useRef(false);
+  const lastSnapshotStatusRef = React.useRef<string | null>(null);
+  const lastSnapshotCountsRef = React.useRef({ ready: 0, failed: 0, queued: 0 });
 
-  const clearStream = React.useCallback(() => {
+  const selectedJob = React.useMemo(
+    () => results.find((item) => item.id === selectedJobId) || null,
+    [results, selectedJobId],
+  );
+
+  const closeStream = React.useCallback(() => {
     streamRef.current?.close();
     streamRef.current = null;
-    if (runtimeTimeoutRef.current) {
-      clearTimeout(runtimeTimeoutRef.current);
-      runtimeTimeoutRef.current = null;
+  }, []);
+
+  const clearLiveWindowTimeout = React.useCallback(() => {
+    if (liveWindowTimeoutRef.current) {
+      clearTimeout(liveWindowTimeoutRef.current);
+      liveWindowTimeoutRef.current = null;
     }
   }, []);
+
+  const clearSnapshotPolling = React.useCallback(() => {
+    if (snapshotPollRef.current) {
+      clearInterval(snapshotPollRef.current);
+      snapshotPollRef.current = null;
+    }
+    snapshotRequestInFlightRef.current = false;
+  }, []);
+
+  const clearRunActivity = React.useCallback(() => {
+    closeStream();
+    clearLiveWindowTimeout();
+    clearSnapshotPolling();
+  }, [clearLiveWindowTimeout, clearSnapshotPolling, closeStream]);
 
   const addTimelineEvent = React.useCallback((title: string, description: string, severity: TimelineSeverity = 'info', eventStatus: TimelineStatus = 'running') => {
     setTimeline((prev) => [
@@ -174,6 +154,12 @@ export function SessionPage() {
       ...prev,
     ]);
   }, []);
+
+  React.useEffect(() => {
+    if (selectedJobId && !selectedJob) {
+      setSelectedJobId(null);
+    }
+  }, [selectedJob, selectedJobId]);
 
   const upsertResult = React.useCallback((incoming: SearchResult) => {
     setResults((prev) => {
@@ -192,6 +178,75 @@ export function SessionPage() {
       });
     });
   }, []);
+
+  const finalizeRunState = React.useCallback(
+    (nextStatus: 'completed' | 'error', phase: SearchPhase, title: string, description: string, severity: TimelineSeverity) => {
+      if (!isCompletedRef.current) {
+        addTimelineEvent(title, description, severity, nextStatus === 'error' ? 'failed' : 'completed');
+      }
+      setStatus(nextStatus);
+      setSearchPhase(phase);
+      isCompletedRef.current = true;
+      clearRunActivity();
+    },
+    [addTimelineEvent, clearRunActivity],
+  );
+
+  const applySnapshot = React.useCallback(
+    (snapshot: SearchRunSnapshot | null) => {
+      if (!snapshot) return;
+      const snapshotResults = Array.isArray(snapshot.results) ? snapshot.results : [];
+      setResults(snapshotResults);
+      lastSequenceRef.current = Math.max(lastSequenceRef.current, Number(snapshot.lastSequence || 0));
+
+      const counts = {
+        queued: Number(snapshot.counts?.queued || 0),
+        ready: Number(snapshot.counts?.ready || 0),
+        failed: Number(snapshot.counts?.failed || 0),
+      };
+
+      if (searchPhase === 'background-monitoring' && snapshot.status === 'running') {
+        const previous = lastSnapshotCountsRef.current;
+        if (
+          previous.ready !== counts.ready ||
+          previous.failed !== counts.failed ||
+          previous.queued !== counts.queued
+        ) {
+          addTimelineEvent(
+            'Background progress',
+            `${counts.ready} ready • ${counts.failed} failed • ${counts.queued} queued`,
+            'info',
+            'running',
+          );
+        }
+      }
+      lastSnapshotCountsRef.current = counts;
+
+      if (snapshot.status === lastSnapshotStatusRef.current && snapshot.status !== 'running') return;
+      lastSnapshotStatusRef.current = snapshot.status;
+
+      if (snapshot.status === 'completed') {
+        finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
+        return;
+      }
+
+      if (snapshot.status === 'stopped') {
+        finalizeRunState('completed', 'completed', 'Search stopped', 'Search session ended manually.', 'warning');
+        return;
+      }
+
+      if (snapshot.status === 'failed') {
+        const timeoutEvent = Array.isArray(snapshot.events)
+          ? snapshot.events.find(
+              (event) => event.type === 'run_error' && String(event.payload?.code || '').toLowerCase() === 'timeout',
+            )
+          : null;
+        const description = String(timeoutEvent?.payload?.message || 'Search run failed before completion.');
+        finalizeRunState('error', 'error', timeoutEvent ? 'Run timeout' : 'Search failed', description, timeoutEvent ? 'warning' : 'error');
+      }
+    },
+    [addTimelineEvent, finalizeRunState, searchPhase],
+  );
 
   const applyRunEvent = React.useCallback(
     (event: SearchRunEvent) => {
@@ -245,33 +300,22 @@ export function SessionPage() {
       }
 
       if (event.type === 'run_completed') {
-        addTimelineEvent('Search completed', 'Queue finished and results are now stable.', 'success', 'completed');
-        setStatus('completed');
-        setSearchPhase('completed');
-        isCompletedRef.current = true;
-        clearStream();
+        finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
         return;
       }
 
       if (event.type === 'run_stopped') {
-        addTimelineEvent('Search stopped', 'Run was stopped manually.', 'warning', 'completed');
-        setStatus('completed');
-        setSearchPhase('completed');
-        isCompletedRef.current = true;
-        clearStream();
+        finalizeRunState('completed', 'completed', 'Search stopped', 'Run was stopped manually.', 'warning');
         return;
       }
 
       if (event.type === 'run_error') {
         const details = String(event.payload?.message || 'Unknown search error');
-        addTimelineEvent('Search error', details, 'error', 'failed');
-        setStatus('error');
-        setSearchPhase('error');
-        isCompletedRef.current = true;
-        clearStream();
+        const isTimeout = String(event.payload?.code || '').toLowerCase() === 'timeout';
+        finalizeRunState('error', 'error', isTimeout ? 'Run timeout' : 'Search error', details, isTimeout ? 'warning' : 'error');
       }
     },
-    [addTimelineEvent, clearStream, upsertResult],
+    [addTimelineEvent, finalizeRunState, upsertResult],
   );
 
   const flushQueuedEvents = React.useCallback(() => {
@@ -283,7 +327,7 @@ export function SessionPage() {
 
   const connectToRunStream = React.useCallback(
     (searchRunId: string) => {
-      clearStream();
+      closeStream();
       streamRef.current = connectJobSearchRunStream({
         runId: searchRunId,
         since: lastSequenceRef.current,
@@ -296,58 +340,55 @@ export function SessionPage() {
           }
           applyRunEvent(event);
         },
-        onSnapshot: (snapshot) => {
-          const snapshotResults = Array.isArray(snapshot.results) ? snapshot.results : [];
-          if (snapshotResults.length) setResults(snapshotResults);
-          if (snapshot.status === 'completed' || snapshot.status === 'stopped' || snapshot.status === 'failed') {
-            setStatus(snapshot.status === 'failed' ? 'error' : 'completed');
-            setSearchPhase(snapshot.status === 'failed' ? 'error' : 'completed');
-            isCompletedRef.current = true;
-          }
-        },
+        onSnapshot: applySnapshot,
         onError: () => {
           if (isCompletedRef.current) return;
           addTimelineEvent('Stream reconnecting', 'Live updates interrupted. Trying to reconnect.', 'warning', 'running');
         },
       });
     },
-    [addTimelineEvent, applyRunEvent, clearStream],
+    [addTimelineEvent, applyRunEvent, applySnapshot, closeStream],
   );
 
-  const runFallbackSearch = React.useCallback(async () => {
-    addTimelineEvent('Streaming unavailable', 'Falling back to direct API search mode.', 'warning', 'running');
-    try {
-      const fetched = await searchJobs({
-        query: searchQuery,
-        countryCode,
-        maxNumResults: 12,
-      });
-      const mapped = fetched.map((item, index) => {
-        const source = sourceFromLink(item.link, item.sourceName || item.organization);
-        return {
-          ...item,
-          sourceName: item.sourceName || source.sourceName,
-          sourceDomain: item.sourceDomain || source.sourceDomain,
-          sourceType: item.sourceType || 'job_board',
-          sourceVerified: item.sourceVerified ?? true,
-          queueStatus: item.queueStatus || 'ready',
-          queuePosition: index + 1,
-        } satisfies SearchResult;
-      });
-      setResults(mapped.length ? mapped : FALLBACK_RESULTS);
-      setStatus('completed');
-      setSearchPhase('completed');
-      isCompletedRef.current = true;
-      addTimelineEvent('Fallback search completed', `${mapped.length || FALLBACK_RESULTS.length} opportunities loaded.`, 'success', 'completed');
-    } catch (error) {
-      setResults(FALLBACK_RESULTS);
+  const startSnapshotPolling = React.useCallback(
+    (searchRunId: string) => {
+      clearSnapshotPolling();
+
+      const poll = async () => {
+        if (snapshotRequestInFlightRef.current || isCompletedRef.current) return;
+        snapshotRequestInFlightRef.current = true;
+        try {
+          const snapshot = await getJobSearchRunSnapshot(searchRunId);
+          applySnapshot(snapshot);
+        } catch {
+          if (!isCompletedRef.current) {
+            addTimelineEvent('Background sync delayed', 'Could not refresh background search state. Retrying shortly.', 'warning', 'running');
+          }
+        } finally {
+          snapshotRequestInFlightRef.current = false;
+        }
+      };
+
+      void poll();
+      snapshotPollRef.current = setInterval(() => {
+        void poll();
+      }, SNAPSHOT_POLL_INTERVAL_MS);
+    },
+    [addTimelineEvent, applySnapshot, clearSnapshotPolling],
+  );
+
+  const handleStartFailure = React.useCallback(
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Search run could not be started.';
+      setResults([]);
       setStatus('error');
       setSearchPhase('error');
       isCompletedRef.current = true;
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      addTimelineEvent('Fallback failed', message, 'error', 'failed');
-    }
-  }, [addTimelineEvent, countryCode, searchQuery]);
+      clearRunActivity();
+      addTimelineEvent('Search unavailable', message, 'error', 'failed');
+    },
+    [addTimelineEvent, clearRunActivity],
+  );
 
   React.useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -368,6 +409,8 @@ export function SessionPage() {
     hasStartedRef.current = true;
     isCompletedRef.current = false;
     eventQueueRef.current = [];
+    lastSnapshotStatusRef.current = null;
+    lastSnapshotCountsRef.current = { ready: 0, failed: 0, queued: 0 };
 
     const start = async () => {
       setSearchPhase('initializing');
@@ -384,40 +427,40 @@ export function SessionPage() {
         setRunId(started.runId);
         connectToRunStream(started.runId);
 
-        runtimeTimeoutRef.current = setTimeout(async () => {
+        liveWindowTimeoutRef.current = setTimeout(() => {
           if (isCompletedRef.current) return;
-          addTimelineEvent('Run timeout', `Run exceeded ${Math.round(MAX_SEARCH_RUNTIME_MS / 1000)} seconds and was stopped.`, 'warning', 'failed');
-          if (started.runId) {
-            try {
-              await stopJobSearchRun(started.runId);
-            } catch {
-              // Ignore stop errors at timeout boundary.
-            }
-          }
-          setStatus('completed');
-          setSearchPhase('completed');
-          isCompletedRef.current = true;
-          clearStream();
+          closeStream();
+          setStatus('running');
+          setSearchPhase('background-monitoring');
+          addTimelineEvent(
+            'Live view timed out',
+            `Live updates paused after ${Math.round(MAX_SEARCH_RUNTIME_MS / 1000)} seconds. Search continues in background and results will refresh automatically.`,
+            'warning',
+            'running',
+          );
+          startSnapshotPolling(started.runId);
         }, MAX_SEARCH_RUNTIME_MS);
-      } catch {
-        await runFallbackSearch();
+      } catch (error) {
+        handleStartFailure(error);
       }
     };
 
     void start();
 
     return () => {
-      clearStream();
+      clearRunActivity();
     };
   }, [
     addTimelineEvent,
-    clearStream,
+    clearRunActivity,
+    closeStream,
     connectToRunStream,
     countryCode,
     formData.remote,
     formData.visaSponsorship,
-    runFallbackSearch,
+    handleStartFailure,
     searchQuery,
+    startSnapshotPolling,
   ]);
 
   const formatTime = (seconds: number) => {
@@ -427,7 +470,7 @@ export function SessionPage() {
   };
 
   const handlePause = () => {
-    if (status !== 'running' || isCompletedRef.current) return;
+    if (status !== 'running' || isCompletedRef.current || searchPhase === 'background-monitoring') return;
     setStatus('paused');
     addTimelineEvent('Search paused', 'Incoming stream updates are queued until resume.', 'warning', 'queued');
   };
@@ -437,16 +480,15 @@ export function SessionPage() {
     setStatus('running');
     addTimelineEvent('Search resumed', 'Queued updates are now being applied.', 'info', 'running');
     flushQueuedEvents();
-    if (runId && !streamRef.current) {
+    if (runId && !streamRef.current && searchPhase !== 'background-monitoring') {
       const snapshot = await getJobSearchRunSnapshot(runId);
-      if (snapshot?.results?.length) setResults(snapshot.results);
+      applySnapshot(snapshot);
       connectToRunStream(runId);
     }
   };
 
   const handleStop = async () => {
     if (isCompletedRef.current) return;
-    isCompletedRef.current = true;
     if (runId) {
       try {
         await stopJobSearchRun(runId);
@@ -454,13 +496,10 @@ export function SessionPage() {
         // Stop can race with completion; ignore transport errors.
       }
     }
-    clearStream();
-    setStatus('completed');
-    setSearchPhase('completed');
-    addTimelineEvent('Search stopped', 'Search session ended manually.', 'warning', 'completed');
+    finalizeRunState('completed', 'completed', 'Search stopped', 'Search session ended manually.', 'warning');
   };
 
-  const isSearching = status === 'running' && !isCompletedRef.current;
+  const isSearching = (status === 'running' || status === 'paused') && !isCompletedRef.current;
 
   const visibleResults = React.useMemo(() => {
     if (activeTab === 'all') return results;
@@ -514,6 +553,11 @@ export function SessionPage() {
                 {status === 'running' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
                 {status}
               </div>
+              {searchPhase === 'background-monitoring' && (
+                <div className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sky-50 text-sky-700">
+                  Background Sync
+                </div>
+              )}
             </div>
             <p className="text-xs md:text-sm text-neutral-500 flex items-center gap-2">
               <Search size={14} />
@@ -522,7 +566,7 @@ export function SessionPage() {
           </div>
 
           <div className="flex items-center gap-2 w-full md:w-auto">
-            {status === 'running' && (
+            {status === 'running' && searchPhase !== 'background-monitoring' && (
               <button
                 onClick={handlePause}
                 className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-amber-50 text-amber-600 rounded-lg font-bold hover:bg-amber-100 transition-all min-h-[44px]"
@@ -530,6 +574,13 @@ export function SessionPage() {
                 <Pause size={18} />
                 <span className="md:hidden lg:inline">Pause</span>
               </button>
+            )}
+
+            {status === 'running' && searchPhase === 'background-monitoring' && (
+              <div className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-sky-50 text-sky-700 rounded-lg font-bold min-h-[44px]">
+                <Loader2 size={18} className="animate-spin" />
+                <span className="md:hidden lg:inline">Background</span>
+              </div>
             )}
 
             {status === 'paused' && (
@@ -678,8 +729,16 @@ export function SessionPage() {
             <div className="p-4 rounded-xl bg-neutral-100 border border-neutral-200 flex items-start gap-3">
               <Loader2 size={18} className="animate-spin text-neutral-900 mt-0.5" />
               <div>
-                <p className="text-xs font-bold text-neutral-800 uppercase tracking-wide">Searching for more opportunities...</p>
-                <p className="text-xs text-neutral-600 mt-1">Live queue is active. New cards will appear below in order.</p>
+                <p className="text-xs font-bold text-neutral-800 uppercase tracking-wide">
+                  {searchPhase === 'background-monitoring'
+                    ? 'Search continues in background...'
+                    : 'Searching for more opportunities...'}
+                </p>
+                <p className="text-xs text-neutral-600 mt-1">
+                  {searchPhase === 'background-monitoring'
+                    ? 'Live streaming has ended for this session. Results are refreshing from backend snapshots.'
+                    : 'Live queue is active. New cards will appear below in order.'}
+                </p>
               </div>
             </div>
           )}
@@ -768,7 +827,7 @@ export function SessionPage() {
                           <CheckCircle2 size={16} />
                         </button>
                         <button
-                          onClick={() => setSelectedJob(result)}
+                          onClick={() => setSelectedJobId(result.id)}
                           className="p-2 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-all"
                           title="View details"
                         >
@@ -793,7 +852,7 @@ export function SessionPage() {
         </div>
       </div>
 
-      <JobDetailsModal job={selectedJob} onClose={() => setSelectedJob(null)} />
+      <JobDetailsModal job={selectedJob} onClose={() => setSelectedJobId(null)} />
     </div>
   );
 }
