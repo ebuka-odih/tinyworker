@@ -9,13 +9,17 @@ import {
   CheckCircle2,
   Loader2,
   Filter,
-  Globe,
   Search,
   AlertCircle,
   Eye,
+  ChevronDown,
+  ChevronUp,
+  Lock,
+  Crown,
+  Sparkles,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { JobQueueStatus, SearchCacheState, SearchResult, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
+import { AuthUser, JobQueueStatus, SearchCacheState, SearchResult, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
 import {
   ApiUnauthorizedError,
   SearchRunEvent,
@@ -51,6 +55,50 @@ const COUNTRY_CODES: Record<string, string> = {
 };
 
 const SNAPSHOT_POLL_INTERVAL_MS = 5_000;
+const SOURCE_CATALOG = [
+  {
+    name: 'LinkedIn Jobs',
+    domain: 'linkedin.com/jobs',
+    summary: 'Large current-job index with strong employer coverage.',
+    emphasis: 'Best for volume',
+  },
+  {
+    name: 'Indeed',
+    domain: 'indeed.com',
+    summary: 'Broad coverage across direct employer and ATS listings.',
+    emphasis: 'Best for breadth',
+  },
+  {
+    name: 'Glassdoor',
+    domain: 'glassdoor.com',
+    summary: 'High-signal employer pages and recent openings.',
+    emphasis: 'Employer context',
+  },
+  {
+    name: 'Greenhouse',
+    domain: 'boards.greenhouse.io',
+    summary: 'Direct ATS listings from tech and startup teams.',
+    emphasis: 'Direct ATS',
+  },
+  {
+    name: 'Lever',
+    domain: 'jobs.lever.co',
+    summary: 'Direct ATS roles that often appear before aggregation.',
+    emphasis: 'Direct ATS',
+  },
+  {
+    name: 'Ashby',
+    domain: 'jobs.ashbyhq.com',
+    summary: 'Fast-moving startup and growth-company hiring.',
+    emphasis: 'Startup ATS',
+  },
+  {
+    name: 'Djinni',
+    domain: 'djinni.co',
+    summary: 'Developer-friendly board with strong European overlap.',
+    emphasis: 'Regional quality',
+  },
+] as const;
 
 function hasSessionCriteria(formData: JobSearchIntakeData | null | undefined) {
   if (!formData) return false;
@@ -175,12 +223,34 @@ function resultIdentity(result: Pick<SearchResult, 'link' | 'title' | 'organizat
   ].join('::');
 }
 
+function getSubscriptionTier(authUser: AuthUser | null): 'free' | 'pro' | 'team' {
+  const rawTier = String(authUser?.subscriptionTier || '').trim().toLowerCase();
+  if (authUser?.isPro) return 'pro';
+  if (rawTier === 'team' || rawTier === 'business' || rawTier === 'enterprise') return 'team';
+  if (rawTier === 'pro' || rawTier === 'premium' || rawTier === 'paid') return 'pro';
+  return 'free';
+}
+
+function planLabel(tier: 'free' | 'pro' | 'team') {
+  if (tier === 'team') return 'Team';
+  if (tier === 'pro') return 'Pro';
+  return 'Starter';
+}
+
+function planBadgeClass(tier: 'free' | 'pro' | 'team') {
+  if (tier === 'team') return 'border-sky-200 bg-sky-100 text-sky-800';
+  if (tier === 'pro') return 'border-amber-200 bg-amber-100 text-amber-800';
+  return 'border-neutral-200 bg-neutral-100 text-neutral-600';
+}
+
 export function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const { accessToken, authUser, signOut } = useAuth();
   const authUserId = String(authUser?.userId || '').trim();
+  const subscriptionTier = React.useMemo(() => getSubscriptionTier(authUser), [authUser]);
+  const hasAdvancedAccess = subscriptionTier !== 'free';
   const state = (location.state || {}) as SessionLocationState;
   const [sessionFormData, setSessionFormData] = React.useState<JobSearchIntakeData>(state.formData || {});
   const roles = sessionFormData.roles || [];
@@ -191,12 +261,17 @@ export function SessionPage() {
       ? COUNTRY_CODES[sessionFormData.location]
       : undefined;
   const searchQuery = React.useMemo(() => {
-    const rolePart = roles.length ? roles.join(' OR ') : 'backend engineer';
+    const strictMatching = Boolean(sessionFormData.strictMatching);
+    const rolePart = roles.length
+      ? roles.map((role) => (strictMatching ? `"${role}"` : role)).join(' OR ')
+      : strictMatching
+      ? '"backend engineer"'
+      : 'backend engineer';
     const sponsorshipPart = sessionFormData.visaSponsorship ? 'with visa sponsorship' : '';
     const remotePart = sessionFormData.remote ? 'remote' : '';
     const locationPart = locationLabel !== 'Any location' ? `jobs in ${locationLabel}` : '';
     return [rolePart, locationPart, sponsorshipPart, remotePart].filter(Boolean).join(' ');
-  }, [roles, sessionFormData.visaSponsorship, sessionFormData.remote, locationLabel]);
+  }, [roles, sessionFormData.strictMatching, sessionFormData.visaSponsorship, sessionFormData.remote, locationLabel]);
 
   const [status, setStatus] = React.useState<'running' | 'paused' | 'completed' | 'error'>('running');
   const [searchPhase, setSearchPhase] = React.useState<SearchPhase>('initializing');
@@ -211,6 +286,7 @@ export function SessionPage() {
   const [isHydrated, setIsHydrated] = React.useState(false);
   const [savedJobKeys, setSavedJobKeys] = React.useState<Set<string>>(new Set());
   const [savingJobIds, setSavingJobIds] = React.useState<Set<string>>(new Set());
+  const [isMobileActivityCollapsed, setIsMobileActivityCollapsed] = React.useState(true);
 
   const streamRef = React.useRef<{ close: () => void } | null>(null);
   const snapshotPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -751,7 +827,7 @@ export function SessionPage() {
         query: searchQuery,
         countryCode,
         maxNumResults: 10,
-        sourceScope: 'global',
+        sourceScope: sessionFormData.sourceScope || 'global',
         remote: sessionFormData.remote,
         visaSponsorship: sessionFormData.visaSponsorship,
       });
@@ -768,6 +844,7 @@ export function SessionPage() {
     handleStartFailure,
     searchQuery,
     sessionFormData.remote,
+    sessionFormData.sourceScope,
     sessionFormData.visaSponsorship,
   ]);
 
@@ -968,6 +1045,8 @@ export function SessionPage() {
     return results.filter((result) => result.status === 'saved');
   }, [results, activeTab]);
 
+  const hiddenTimelineCount = Math.max(0, timeline.length);
+
   const statusBadgeClass =
     status === 'running'
       ? 'bg-emerald-50 text-emerald-600'
@@ -1000,6 +1079,41 @@ export function SessionPage() {
     }
     return Array.from(bySource.values()).slice(0, 6);
   }, [results, isSearching]);
+
+  const activeFilterSummary = React.useMemo(
+    () => [
+      { label: 'Remote', value: sessionFormData.remote ? 'Required' : 'Flexible' },
+      { label: 'Sponsorship', value: sessionFormData.visaSponsorship ? 'Required' : 'Optional' },
+      { label: 'Coverage', value: sessionFormData.sourceScope === 'regional' ? 'Regional' : 'Global' },
+      { label: 'Match mode', value: sessionFormData.strictMatching ? 'Strict' : 'Balanced' },
+    ],
+    [sessionFormData.remote, sessionFormData.sourceScope, sessionFormData.strictMatching, sessionFormData.visaSponsorship],
+  );
+
+  const visibleSources = React.useMemo(() => {
+    const liveStatusBySource = new Map(sourceRows.map((source) => [source.name.toLowerCase(), source.status]));
+    return SOURCE_CATALOG.map((source) => ({
+      ...source,
+      status: liveStatusBySource.get(source.name.toLowerCase()) || (isSearching ? 'Queued' : 'Included'),
+    }));
+  }, [isSearching, sourceRows]);
+
+  const updateSessionAdvancedSetting = React.useCallback(
+    (patch: Partial<JobSearchIntakeData>) => {
+      if (!hasAdvancedAccess) return;
+      setSessionFormData((prev) => ({ ...prev, ...patch }));
+    },
+    [hasAdvancedAccess],
+  );
+
+  const handleEditCriteria = React.useCallback(() => {
+    navigate('/intake/job', {
+      state: {
+        prefill: sessionFormData,
+        reusedFromSessionId: id,
+      },
+    });
+  }, [id, navigate, sessionFormData]);
 
   const startedDateLabel = React.useMemo(() => {
     if (!startedAtMs) return new Date().toLocaleDateString();
@@ -1080,73 +1194,266 @@ export function SessionPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm space-y-6">
-            <div>
-              <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Filter size={14} />
-                Live Filters
-              </h3>
-              <div className="space-y-3">
-                {[
-                  { label: 'Expand search', active: true },
-                  { label: 'Visa sponsorship only', active: Boolean(sessionFormData.visaSponsorship) },
-                  { label: 'Strict matching', active: false },
-                ].map((filter) => (
-                  <label key={filter.label} className="flex items-center justify-between cursor-pointer group">
-                    <span className="text-sm font-medium text-neutral-600 group-hover:text-neutral-900">{filter.label}</span>
-                    <div className={`w-8 h-4 rounded-full relative transition-all ${filter.active ? 'bg-neutral-900' : 'bg-neutral-200'}`}>
-                      <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${filter.active ? 'left-4.5' : 'left-0.5'}`} />
-                    </div>
-                  </label>
-                ))}
+          <div className="overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
+            <div className="border-b border-neutral-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.14),_transparent_42%),linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.28em] text-neutral-500">
+                    <Filter size={14} />
+                    Search Controls
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-neutral-600">
+                    A cleaner view of what this run is doing now, plus which deeper controls are unlocked on your plan.
+                  </p>
+                </div>
+                <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] ${planBadgeClass(subscriptionTier)}`}>
+                  {subscriptionTier === 'free' ? <Lock size={12} /> : <Crown size={12} />}
+                  {planLabel(subscriptionTier)}
+                </div>
               </div>
-            </div>
 
-            <div className="pt-6 border-t border-neutral-100">
-              <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Globe size={14} />
-                Sources
-              </h3>
-              <div className="space-y-3">
-                {sourceRows.map((source) => (
-                  <div key={source.name} className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-neutral-600">{source.name}</span>
-                    <div className="flex items-center gap-1.5">
-                      {source.status === 'Searching' && <Loader2 size={12} className="animate-spin text-neutral-900" />}
-                      {source.status === 'Completed' && <CheckCircle2 size={12} className="text-emerald-600" />}
-                      {source.status === 'Failed' && <AlertCircle size={12} className="text-red-500" />}
-                      <span
-                        className={`text-[10px] font-bold uppercase ${
-                          source.status === 'Searching'
-                            ? 'text-neutral-900'
-                            : source.status === 'Completed'
-                            ? 'text-emerald-600'
-                            : 'text-red-500'
-                        }`}
-                      >
-                        {source.status}
-                      </span>
-                    </div>
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                {activeFilterSummary.map((item) => (
+                  <div key={item.label} className="rounded-2xl border border-white/80 bg-white/85 px-3 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-400">{item.label}</div>
+                    <div className="mt-1 text-sm font-semibold text-neutral-900">{item.value}</div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="pt-6 border-t border-neutral-100">
-              <button className="w-full py-2.5 bg-neutral-900 text-white rounded-lg text-sm font-bold hover:bg-neutral-800 transition-all">
-                Edit Criteria
-              </button>
+            <div className="space-y-6 p-5">
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-[0.22em] text-neutral-400">Advanced Settings</h3>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                      These controls are saved locally for the next search. The current run keeps using the settings it started with.
+                    </p>
+                  </div>
+                  {!hasAdvancedAccess && (
+                    <div className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-500">
+                      <Lock size={11} />
+                      Pro only
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <button
+                    type="button"
+                    disabled={!hasAdvancedAccess}
+                    onClick={() =>
+                      updateSessionAdvancedSetting({
+                        expandSearch: !(sessionFormData.expandSearch ?? true),
+                      })
+                    }
+                    className={`flex w-full items-center justify-between rounded-2xl border px-3 py-3 text-left transition-all ${
+                      hasAdvancedAccess ? 'border-neutral-200 bg-white hover:border-neutral-300' : 'border-neutral-200 bg-neutral-100/80'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-sm font-semibold text-neutral-900">Expand search coverage</div>
+                      <div className="mt-1 text-xs leading-5 text-neutral-500">Keep the discovery net wider before final ranking narrows the list.</div>
+                    </div>
+                    <div
+                      className={`relative h-6 w-11 rounded-full transition-all ${
+                        sessionFormData.expandSearch ?? true ? 'bg-neutral-900' : 'bg-neutral-300'
+                      } ${!hasAdvancedAccess ? 'opacity-55' : ''}`}
+                    >
+                      <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${(sessionFormData.expandSearch ?? true) ? 'left-6' : 'left-1'}`} />
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!hasAdvancedAccess}
+                    onClick={() =>
+                      updateSessionAdvancedSetting({
+                        strictMatching: !Boolean(sessionFormData.strictMatching),
+                      })
+                    }
+                    className={`flex w-full items-center justify-between rounded-2xl border px-3 py-3 text-left transition-all ${
+                      hasAdvancedAccess ? 'border-neutral-200 bg-white hover:border-neutral-300' : 'border-neutral-200 bg-neutral-100/80'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-sm font-semibold text-neutral-900">Strict title matching</div>
+                      <div className="mt-1 text-xs leading-5 text-neutral-500">Use exact role phrases instead of broader intent-based matching.</div>
+                    </div>
+                    <div
+                      className={`relative h-6 w-11 rounded-full transition-all ${
+                        sessionFormData.strictMatching ? 'bg-neutral-900' : 'bg-neutral-300'
+                      } ${!hasAdvancedAccess ? 'opacity-55' : ''}`}
+                    >
+                      <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${sessionFormData.strictMatching ? 'left-6' : 'left-1'}`} />
+                    </div>
+                  </button>
+
+                  <div className={`rounded-2xl border px-3 py-3 ${hasAdvancedAccess ? 'border-neutral-200 bg-white' : 'border-neutral-200 bg-neutral-100/80'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-neutral-900">Source coverage</div>
+                        <div className="mt-1 text-xs leading-5 text-neutral-500">Regional keeps the run tighter. Global keeps the full approved source list active.</div>
+                      </div>
+                      {!hasAdvancedAccess && <Lock size={14} className="mt-1 text-neutral-400" />}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {[
+                        { value: 'regional', label: 'Regional' },
+                        { value: 'global', label: 'Global' },
+                      ].map((option) => {
+                        const active = (sessionFormData.sourceScope || 'global') === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            disabled={!hasAdvancedAccess}
+                            onClick={() => updateSessionAdvancedSetting({ sourceScope: option.value as JobSearchIntakeData['sourceScope'] })}
+                            className={`rounded-xl border px-3 py-2 text-sm font-semibold transition-all ${
+                              active
+                                ? 'border-neutral-900 bg-neutral-900 text-white'
+                                : hasAdvancedAccess
+                                ? 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300'
+                                : 'border-neutral-200 bg-white text-neutral-400'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-dashed border-neutral-200 bg-white px-3 py-3 text-xs leading-5 text-neutral-500">
+                  {hasAdvancedAccess ? (
+                    <span className="inline-flex items-start gap-2">
+                      <Sparkles size={14} className="mt-0.5 text-emerald-600" />
+                      Strict matching and coverage updates are real settings here. They will be reused the next time you start a search from this session.
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-start gap-2">
+                      <Lock size={14} className="mt-0.5 text-neutral-400" />
+                      Starter accounts can review the recommended setup, while advanced tuning stays locked until the account exposes Pro access.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-[0.22em] text-neutral-400">Source List</h3>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                      Users can see the exact source mix here. Source-level editing stays locked behind subscription controls.
+                    </p>
+                  </div>
+                  <div className="rounded-full bg-neutral-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-500">
+                    Read only
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {visibleSources.map((source) => (
+                    <div key={source.name} className="rounded-2xl border border-neutral-200 bg-white px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-neutral-900">{source.name}</span>
+                            <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                              {source.emphasis}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs leading-5 text-neutral-500">{source.summary}</p>
+                          <p className="mt-1 text-[11px] font-medium text-neutral-400">{source.domain}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {source.status === 'Searching' && <Loader2 size={12} className="animate-spin text-neutral-900" />}
+                          {source.status === 'Completed' && <CheckCircle2 size={12} className="text-emerald-600" />}
+                          {source.status === 'Failed' && <AlertCircle size={12} className="text-red-500" />}
+                          <span
+                            className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
+                              source.status === 'Searching'
+                                ? 'bg-neutral-100 text-neutral-700'
+                                : source.status === 'Completed'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : source.status === 'Failed'
+                                ? 'bg-red-50 text-red-700'
+                                : source.status === 'Queued'
+                                ? 'bg-amber-50 text-amber-700'
+                                : 'bg-sky-50 text-sky-700'
+                            }`}
+                          >
+                            {source.status}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-3 border-t border-neutral-100 pt-1">
+                <button
+                  type="button"
+                  onClick={handleEditCriteria}
+                  className="w-full rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-bold text-white transition-all hover:bg-neutral-800"
+                >
+                  Edit Basic Criteria
+                </button>
+                <div className="rounded-2xl bg-neutral-50 px-4 py-3 text-xs leading-5 text-neutral-500">
+                  Role, location, remote preference, and sponsorship still change through the intake flow so the live run does not drift under the user.
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         <div className="lg:col-span-4 space-y-4">
           <div className="flex items-center justify-between px-2">
-            <h3 className="text-sm font-bold text-neutral-900">Live Activity Feed</h3>
-            <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Real-time transparency</span>
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-bold text-neutral-900">Live Activity Feed</h3>
+              <button
+                type="button"
+                onClick={() => setIsMobileActivityCollapsed((prev) => !prev)}
+                className="inline-flex lg:hidden items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-neutral-600"
+              >
+                {isMobileActivityCollapsed ? (
+                  <>
+                    Show
+                    <ChevronDown size={12} />
+                  </>
+                ) : (
+                  <>
+                    Hide
+                    <ChevronUp size={12} />
+                  </>
+                )}
+              </button>
+            </div>
+            <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
+              {isMobileActivityCollapsed ? 'Hidden on mobile' : 'Real-time transparency'}
+            </span>
           </div>
 
-          <div className="space-y-4 relative before:absolute before:left-[19px] before:top-4 before:bottom-4 before:w-px before:bg-neutral-200">
+          {isMobileActivityCollapsed ? (
+            <div className="lg:hidden rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-500">Activity hidden</p>
+                  <p className="mt-1 text-xs leading-5 text-neutral-500">
+                    Live updates are still running. Show the feed any time if you want to inspect the search timeline.
+                  </p>
+                </div>
+                <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                  {hiddenTimelineCount} update{hiddenTimelineCount === 1 ? '' : 's'}
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          <div className={`relative space-y-4 ${timeline.length > 1 ? 'before:absolute before:left-[19px] before:top-4 before:bottom-4 before:w-px before:bg-neutral-200' : ''} ${isMobileActivityCollapsed ? 'hidden lg:block' : ''}`}>
             <AnimatePresence initial={false}>
               {timeline.length === 0 ? (
                 <div className="bg-white border border-neutral-200 rounded-xl p-8 text-center">
@@ -1289,6 +1596,11 @@ export function SessionPage() {
                         <p className="text-xs text-neutral-500 mt-1">
                           Source: {result.sourceName} • {result.sourceDomain}
                         </p>
+                        {result.seenOn && result.seenOn.length > 1 && (
+                          <p className="text-xs text-emerald-700 mt-2 font-medium">
+                            Seen on {result.seenOn.length} sources: {result.seenOn.map((source) => source.sourceName).join(', ')}
+                          </p>
+                        )}
                       </div>
                       <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${fitClass(result.fitScore)}`}>{result.fitScore} Fit</div>
                     </div>

@@ -340,3 +340,100 @@ describe('JobSearchOrchestrator timeout handling', () => {
     expect(runStore.setStatus).toHaveBeenCalledWith('run-1', 'completed')
   })
 })
+
+describe('JobSearchOrchestrator heavy-site extraction', () => {
+  const originalProxyEnabled = process.env.JOB_SEARCH_HEAVY_SITE_PROXY_ENABLED
+  const originalProxyCountry = process.env.JOB_SEARCH_HEAVY_SITE_PROXY_COUNTRY
+
+  afterEach(() => {
+    if (originalProxyEnabled === undefined) {
+      delete process.env.JOB_SEARCH_HEAVY_SITE_PROXY_ENABLED
+    } else {
+      process.env.JOB_SEARCH_HEAVY_SITE_PROXY_ENABLED = originalProxyEnabled
+    }
+    if (originalProxyCountry === undefined) {
+      delete process.env.JOB_SEARCH_HEAVY_SITE_PROXY_COUNTRY
+    } else {
+      process.env.JOB_SEARCH_HEAVY_SITE_PROXY_COUNTRY = originalProxyCountry
+    }
+    jest.resetModules()
+    jest.clearAllMocks()
+  })
+
+  it('uses proxy-backed stealth extraction for heavy sites', async () => {
+    process.env.JOB_SEARCH_HEAVY_SITE_PROXY_ENABLED = 'true'
+    process.env.JOB_SEARCH_HEAVY_SITE_PROXY_COUNTRY = 'US'
+    jest.resetModules()
+
+    const tinyfish = {
+      runTinyfishWithFallback: jest.fn().mockResolvedValue({
+        resultJson: {
+          title: 'Senior Backend Engineer',
+          company: 'Acme',
+          location: 'Remote',
+          posted_date: new Date().toISOString().slice(0, 10),
+        },
+      }),
+    }
+    jest.doMock('../tinyfish/tinyfish.client', () => tinyfish)
+
+    const { JobSearchOrchestrator } = require('./job-search.orchestrator')
+
+    const prisma = {
+      jobQueryCache: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+      },
+      jobExtractionCache: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+      },
+    }
+    const valyuSearch = {
+      discoverJobCandidates: jest.fn().mockResolvedValue([
+        {
+          id: 'candidate-1',
+          title: 'Senior Backend Engineer',
+          url: 'https://www.indeed.com/viewjob?jk=abc123',
+          snippet: 'Build APIs.',
+          relevance: 0.9,
+          sourceName: 'Indeed',
+          sourceDomain: 'indeed.com',
+          sourceType: 'job_board',
+          sourceVerified: true,
+        },
+      ]),
+    }
+    const runStore = {
+      createRun: jest.fn().mockResolvedValue({ runId: 'run-1' }),
+      findActiveRunByIntentHash: jest.fn().mockReturnValue(null),
+      upsertResult: jest.fn().mockImplementation(async (_runId, result) => result),
+      appendEvent: jest.fn().mockResolvedValue(null),
+      setStatus: jest.fn().mockResolvedValue(undefined),
+      setCacheState: jest.fn().mockResolvedValue(undefined),
+      isStopRequested: jest.fn().mockReturnValue(false),
+      requestStop: jest.fn().mockReturnValue(true),
+      getSnapshot: jest.fn(),
+      getEventsSince: jest.fn(),
+    }
+
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    await orchestrator.startRun({
+      query: 'backend engineer',
+      maxNumResults: 1,
+      sourceScope: 'global',
+      userId: 'user-1',
+    })
+
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(tinyfish.runTinyfishWithFallback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        browser_profile: 'stealth',
+        proxy_config: expect.objectContaining({ enabled: true, country_code: 'US' }),
+      }),
+    )
+  })
+})

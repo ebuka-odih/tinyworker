@@ -138,4 +138,85 @@ describe('JobSearchRunStore persisted snapshots', () => {
     expect(snapshot?.counts).toEqual({ queued: 0, ready: 1, failed: 1 })
     expect(snapshot?.cache).toEqual(expect.objectContaining({ mode: 'intent', refreshing: true }))
   })
+
+  it('collapses equivalent jobs from different sources into one stored result', async () => {
+    const prisma = {
+      jobSearchRun: {
+        create: jest.fn().mockResolvedValue(undefined),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      jobSearchRunEvent: {
+        create: jest.fn().mockResolvedValue(undefined),
+      },
+    }
+
+    const store = new JobSearchRunStore(prisma as any)
+    const { runId } = await store.createRun({
+      userId: 'user-1',
+      query: 'staff backend engineer',
+      queryHash: 'q1',
+      intentHash: 'i1',
+      countryCode: 'US',
+      sourceScope: 'global',
+    })
+
+    await store.upsertResult(runId, {
+      id: 'lever-job',
+      title: 'Staff Backend Engineer, AI Platform',
+      organization: 'Home Solutions',
+      location: 'Raleigh or Charlotte, NC or Remote',
+      fitScore: 'Low',
+      tags: ['Lever'],
+      link: 'https://jobs.lever.co/home-solutions/123',
+      status: 'new',
+      sourceName: 'Lever',
+      sourceDomain: 'jobs.lever.co',
+      sourceType: 'ats',
+      sourceVerified: true,
+      queueStatus: 'ready',
+      relevance: 0.82,
+      matchReason: 'Backend platform match',
+      requirements: ['Go', 'AWS'],
+    })
+
+    const merged = await store.upsertResult(runId, {
+      id: 'greenhouse-job',
+      title: 'Staff Backend Engineer, AI Platform',
+      organization: 'Home Solutions',
+      location: 'Raleigh or Charlotte, NC, or Remote',
+      fitScore: 'Low',
+      tags: ['Greenhouse'],
+      link: 'https://job-boards.greenhouse.io/home-solutions/jobs/456',
+      status: 'new',
+      sourceName: 'Greenhouse',
+      sourceDomain: 'job-boards.greenhouse.io',
+      sourceType: 'ats',
+      sourceVerified: true,
+      queueStatus: 'ready',
+      relevance: 0.8,
+      snippet: 'Architect and scale AI-powered customer acquisition systems.',
+      responsibilities: ['Design backend systems'],
+      benefits: ['Remote'],
+    })
+
+    expect(merged).toEqual(
+      expect.objectContaining({
+        id: 'lever-job',
+        title: 'Staff Backend Engineer, AI Platform',
+        organization: 'Home Solutions',
+        tags: expect.arrayContaining(['Lever', 'Greenhouse']),
+        requirements: ['Go', 'AWS'],
+        responsibilities: ['Design backend systems'],
+        benefits: ['Remote'],
+        seenOn: expect.arrayContaining([
+          expect.objectContaining({ sourceName: 'Lever', sourceDomain: 'jobs.lever.co' }),
+          expect.objectContaining({ sourceName: 'Greenhouse', sourceDomain: 'job-boards.greenhouse.io' }),
+        ]),
+      }),
+    )
+
+    const snapshot = await store.getSnapshot(runId, 'user-1')
+    expect(snapshot?.results).toHaveLength(1)
+    expect(snapshot?.counts).toEqual({ queued: 0, ready: 1, failed: 0 })
+  })
 })

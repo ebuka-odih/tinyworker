@@ -36,7 +36,7 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[1px] flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="w-full max-w-3xl bg-white rounded-2xl border border-neutral-200 shadow-2xl max-h-[90vh] overflow-hidden flex flex-col"
+        className="w-full max-w-3xl bg-white rounded-2xl border border-neutral-200 shadow-2xl h-[min(90vh,48rem)] overflow-hidden flex flex-col"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 p-5 border-b border-neutral-100">
@@ -55,6 +55,15 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
                 </span>
               )}
             </div>
+            {job.seenOn && job.seenOn.length > 1 && (
+              <p className="mt-2 text-xs font-medium text-emerald-700">
+                Also confirmed on {job.seenOn.length - 1} other source{job.seenOn.length === 2 ? '' : 's'}:{' '}
+                {job.seenOn
+                  .filter((source) => `${source.sourceName}::${source.sourceDomain}` !== `${job.sourceName}::${job.sourceDomain}`)
+                  .map((source) => source.sourceName)
+                  .join(', ')}
+              </p>
+            )}
           </div>
 
           <button
@@ -67,7 +76,7 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
           </button>
         </div>
 
-        <div className="p-5 overflow-y-auto max-h-[calc(90vh-160px)] space-y-5">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-5">
           {!isReady && (
             <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
               <h4 className="text-sm font-bold text-amber-900">Details still loading</h4>
@@ -102,6 +111,24 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
             </section>
           )}
 
+          {job.seenOn && job.seenOn.length > 1 && (
+            <section>
+              <h4 className="text-sm font-bold text-neutral-900 mb-2">Cross-source confidence</h4>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <p className="text-sm text-emerald-900 leading-relaxed">
+                  This job appeared on {job.seenOn.length} sources, which increases confidence that it is a real listing.
+                </p>
+                <ul className="mt-3 space-y-1.5">
+                  {job.seenOn.map((source) => (
+                    <li key={`${source.sourceName}-${source.sourceDomain}`} className="text-sm text-emerald-800">
+                      {source.sourceName} • {source.sourceDomain}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          )}
+
           {!job.snippet && !hasFullDetails && (
             <section className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
               <h4 className="text-sm font-bold text-neutral-900">Limited details available</h4>
@@ -120,7 +147,7 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
           <ListBlock title="Benefits" items={job.benefits} emptyLabel="Benefits are not available for this job yet." />
         </div>
 
-        <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-neutral-100 p-4 flex justify-end">
+        <div className="shrink-0 border-t border-neutral-100 bg-white px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] flex justify-end">
           {canOpenSource ? (
             <a
               href={sourceLink || '#'}

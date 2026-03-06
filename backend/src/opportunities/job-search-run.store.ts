@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { PrismaService } from '../prisma/prisma.service'
-import { rankSearchRunResults } from './job-search-candidate.utils'
+import { rankSearchRunResults, readyResultScore, searchRunResultIdentityKey } from './job-search-candidate.utils'
 
 export type SearchRunStatus = 'running' | 'completed' | 'failed' | 'stopped'
 export type SearchRunEventType =
@@ -52,6 +52,11 @@ export type SearchRunResultItem = {
   responsibilities?: string[]
   benefits?: string[]
   isSuspicious?: boolean
+  seenOn?: Array<{
+    sourceName: string
+    sourceDomain: string
+    sourceVerified: boolean
+  }>
 }
 
 export type SearchRunCacheState = {
@@ -208,9 +213,10 @@ export class JobSearchRunStore {
   async upsertResult(runId: string, result: SearchRunResultItem): Promise<SearchRunResultItem | null> {
     const run = this.runs.get(runId)
     if (!run) return null
-    const existing = run.results.get(result.id)
+    const existingId = run.results.has(result.id) ? result.id : this.findExistingResultIdByIdentity(run, result)
+    const existing = existingId ? run.results.get(existingId) : undefined
     const next = this.mergeResult(existing, result)
-    run.results.set(result.id, next)
+    run.results.set(existingId || result.id, next)
     this.reRankRunResults(run)
 
     const values = Array.from(run.results.values())
@@ -225,7 +231,7 @@ export class JobSearchRunStore {
       },
     })
 
-    return run.results.get(result.id) || next
+    return run.results.get(existingId || result.id) || next
   }
 
   async appendEvent(runId: string, type: SearchRunEventType, payload?: Record<string, any>): Promise<SearchRunEvent | null> {
@@ -387,8 +393,9 @@ export class JobSearchRunStore {
       const incoming = event.payload?.result as SearchRunResultItem | undefined
       if (!incoming?.id) continue
 
-      const existing = byId.get(incoming.id)
-      byId.set(incoming.id, this.mergeResult(existing, incoming))
+      const existingId = byId.has(incoming.id) ? incoming.id : this.findExistingResultIdByIdentity(byId, incoming)
+      const existing = existingId ? byId.get(existingId) : undefined
+      byId.set(existingId || incoming.id, this.mergeResult(existing, incoming))
     }
 
     return rankSearchRunResults(Array.from(byId.values()))
@@ -397,6 +404,20 @@ export class JobSearchRunStore {
   private reRankRunResults(run: RunState): void {
     const ranked = rankSearchRunResults(Array.from(run.results.values()))
     run.results = new Map(ranked.map((item) => [item.id, item]))
+  }
+
+  private findExistingResultIdByIdentity(
+    run: Pick<RunState, 'results'> | Map<string, SearchRunResultItem>,
+    incoming: SearchRunResultItem,
+  ): string | null {
+    const values = run instanceof Map ? Array.from(run.entries()) : Array.from(run.results.entries())
+    const incomingKey = searchRunResultIdentityKey(incoming)
+    for (const [existingId, existing] of values) {
+      if (searchRunResultIdentityKey(existing) === incomingKey) {
+        return existingId
+      }
+    }
+    return null
   }
 
   private countResults(results: SearchRunResultItem[]): { queued: number; ready: number; failed: number } {
@@ -438,12 +459,18 @@ export class JobSearchRunStore {
       return existing
     }
 
+    const stronger = readyResultScore(incoming) >= readyResultScore(existing) ? incoming : existing
+    const weaker = stronger === incoming ? existing : incoming
+
     return {
-      ...existing,
-      ...incoming,
-      requirements: incoming.requirements?.length ? incoming.requirements : existing.requirements,
-      responsibilities: incoming.responsibilities?.length ? incoming.responsibilities : existing.responsibilities,
-      benefits: incoming.benefits?.length ? incoming.benefits : existing.benefits,
+      ...weaker,
+      ...stronger,
+      id: existing.id,
+      tags: Array.from(new Set([...(existing.tags || []), ...(incoming.tags || [])])),
+      requirements: stronger.requirements?.length ? stronger.requirements : weaker.requirements,
+      responsibilities: stronger.responsibilities?.length ? stronger.responsibilities : weaker.responsibilities,
+      benefits: stronger.benefits?.length ? stronger.benefits : weaker.benefits,
+      seenOn: this.mergeSeenOn(existing, incoming),
     }
   }
 
@@ -467,5 +494,32 @@ export class JobSearchRunStore {
     }
 
     return null
+  }
+
+  private mergeSeenOn(existing: SearchRunResultItem, incoming: SearchRunResultItem): SearchRunResultItem['seenOn'] {
+    const merged = [
+      ...(existing.seenOn || []),
+      ...(incoming.seenOn || []),
+      {
+        sourceName: existing.sourceName,
+        sourceDomain: existing.sourceDomain,
+        sourceVerified: existing.sourceVerified,
+      },
+      {
+        sourceName: incoming.sourceName,
+        sourceDomain: incoming.sourceDomain,
+        sourceVerified: incoming.sourceVerified,
+      },
+    ]
+
+    const deduped = new Map<string, NonNullable<SearchRunResultItem['seenOn']>[number]>()
+    for (const source of merged) {
+      const key = `${source.sourceName}::${source.sourceDomain}`
+      if (!deduped.has(key)) {
+        deduped.set(key, source)
+      }
+    }
+
+    return Array.from(deduped.values())
   }
 }

@@ -7,6 +7,7 @@ import {
   deduplicateReadyResults,
   deriveCandidateJobDetails,
   extractedTitleLooksValid,
+  isRecentJobPostingValue,
   rankSearchRunResults,
 } from './job-search-candidate.utils'
 import {
@@ -14,7 +15,7 @@ import {
   type JobSearchCacheIdentity,
   sliceCachedReadyResults,
 } from './job-search-cache.utils'
-import { getActiveDiscoveryDomains, JobSourceScope } from './job-source-registry'
+import { getActiveDiscoveryDomains, isHeavyJobSiteDomain, JobSourceScope } from './job-source-registry'
 import {
   JobSearchRunStore,
   SearchRunCacheState,
@@ -58,6 +59,9 @@ const SUCCESS_QUERY_CACHE_TTL_MS = Number(process.env.JOB_QUERY_CACHE_TTL_MS || 
 const EMPTY_QUERY_CACHE_TTL_MS = Number(process.env.JOB_EMPTY_QUERY_CACHE_TTL_MS || 10 * 60_000)
 const EXTRACT_CACHE_TTL_MS = Number(process.env.JOB_EXTRACT_CACHE_TTL_MS || 24 * 60 * 60_000)
 const ENRICH_CONCURRENCY = Math.min(4, Math.max(1, Number(process.env.JOB_ENRICH_CONCURRENCY || 3)))
+const MAX_JOB_AGE_DAYS = Math.max(1, Number(process.env.JOB_SEARCH_MAX_AGE_DAYS || 21))
+const HEAVY_SITE_PROXY_ENABLED = String(process.env.JOB_SEARCH_HEAVY_SITE_PROXY_ENABLED || 'true').toLowerCase() !== 'false'
+const HEAVY_SITE_PROXY_COUNTRY = String(process.env.JOB_SEARCH_HEAVY_SITE_PROXY_COUNTRY || '').trim().toUpperCase()
 
 @Injectable()
 export class JobSearchOrchestrator {
@@ -349,6 +353,13 @@ export class JobSearchOrchestrator {
       snippet: candidate.snippet,
       relevance: candidate.relevance,
       isSuspicious: false,
+      seenOn: [
+        {
+          sourceName: candidate.sourceName,
+          sourceDomain: candidate.sourceDomain,
+          sourceVerified: candidate.sourceVerified,
+        },
+      ],
     }
   }
 
@@ -368,7 +379,7 @@ export class JobSearchOrchestrator {
       return this.buildReadyItem(base, payload)
     }
 
-    const extracted = await this.extractViaTinyfish(canonicalUrl, input.query)
+    const extracted = await this.extractViaTinyfish(canonicalUrl, input.query, base.sourceDomain)
     await this.prisma.jobExtractionCache.upsert({
       where: { canonicalUrlHash: urlHash },
       update: {
@@ -391,7 +402,8 @@ export class JobSearchOrchestrator {
     return this.buildReadyItem(base, extracted)
   }
 
-  private async extractViaTinyfish(url: string, query: string): Promise<TinyfishExtractedRecord> {
+  private async extractViaTinyfish(url: string, query: string, sourceDomain: string): Promise<TinyfishExtractedRecord> {
+    const useHeavySiteProxy = HEAVY_SITE_PROXY_ENABLED && isHeavyJobSiteDomain(sourceDomain)
     const goal = [
       'Open this job posting and extract structured role data.',
       'Return strict JSON only with the schema:',
@@ -418,7 +430,10 @@ export class JobSearchOrchestrator {
       url,
       goal,
       browser_profile: 'stealth',
-      proxy_config: { enabled: false },
+      proxy_config: {
+        enabled: useHeavySiteProxy,
+        country_code: useHeavySiteProxy && HEAVY_SITE_PROXY_COUNTRY ? HEAVY_SITE_PROXY_COUNTRY : undefined,
+      },
       feature_flags: { enable_agent_memory: false },
       api_integration: 'tinyfinder-job-search',
     })
@@ -501,6 +516,9 @@ export class JobSearchOrchestrator {
     const organization = this.safeText(detailFields.organization) || this.safeText(derived.organization) || base.organization
     if (!extractedTitleLooksValid(title)) {
       throw new Error('TinyFish did not extract a valid job title.')
+    }
+    if (!isRecentJobPostingValue(this.safeText(detailFields.postedDate), MAX_JOB_AGE_DAYS)) {
+      throw new Error(`Job posting is older than ${MAX_JOB_AGE_DAYS} days.`)
     }
 
     return {

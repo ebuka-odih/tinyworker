@@ -7,6 +7,8 @@ export type JobSourceProfile = {
   type: JobSourceType
   verified: boolean
   domains: string[]
+  activeDiscovery: boolean
+  heavySite: boolean
   includeInGlobal: boolean
   includeInRegional: boolean
 }
@@ -32,6 +34,8 @@ export const JOB_SOURCE_PROFILES: JobSourceProfile[] = [
     type: 'job_board',
     verified: true,
     domains: ['linkedin.com'],
+    activeDiscovery: true,
+    heavySite: true,
     includeInGlobal: true,
     includeInRegional: true,
   },
@@ -41,6 +45,8 @@ export const JOB_SOURCE_PROFILES: JobSourceProfile[] = [
     type: 'job_board',
     verified: true,
     domains: ['indeed.com'],
+    activeDiscovery: true,
+    heavySite: true,
     includeInGlobal: true,
     includeInRegional: true,
   },
@@ -50,6 +56,8 @@ export const JOB_SOURCE_PROFILES: JobSourceProfile[] = [
     type: 'job_board',
     verified: true,
     domains: ['glassdoor.com'],
+    activeDiscovery: true,
+    heavySite: true,
     includeInGlobal: true,
     includeInRegional: true,
   },
@@ -59,6 +67,8 @@ export const JOB_SOURCE_PROFILES: JobSourceProfile[] = [
     type: 'ats',
     verified: true,
     domains: ['greenhouse.io', 'boards.greenhouse.io'],
+    activeDiscovery: true,
+    heavySite: false,
     includeInGlobal: true,
     includeInRegional: true,
   },
@@ -68,6 +78,8 @@ export const JOB_SOURCE_PROFILES: JobSourceProfile[] = [
     type: 'ats',
     verified: true,
     domains: ['lever.co', 'jobs.lever.co', 'api.lever.co'],
+    activeDiscovery: true,
+    heavySite: false,
     includeInGlobal: true,
     includeInRegional: true,
   },
@@ -77,25 +89,9 @@ export const JOB_SOURCE_PROFILES: JobSourceProfile[] = [
     type: 'ats',
     verified: true,
     domains: ['ashbyhq.com'],
+    activeDiscovery: true,
+    heavySite: false,
     includeInGlobal: true,
-    includeInRegional: true,
-  },
-  {
-    id: 'jobberman',
-    name: 'Jobberman',
-    type: 'job_board',
-    verified: true,
-    domains: ['jobberman.com'],
-    includeInGlobal: false,
-    includeInRegional: true,
-  },
-  {
-    id: 'myjobmag',
-    name: 'MyJobMag',
-    type: 'job_board',
-    verified: true,
-    domains: ['myjobmag.com'],
-    includeInGlobal: false,
     includeInRegional: true,
   },
   {
@@ -104,7 +100,9 @@ export const JOB_SOURCE_PROFILES: JobSourceProfile[] = [
     type: 'job_board',
     verified: true,
     domains: ['djinni.co'],
-    includeInGlobal: false,
+    activeDiscovery: true,
+    heavySite: false,
+    includeInGlobal: true,
     includeInRegional: true,
   },
 ]
@@ -128,10 +126,20 @@ export function getAllowedDomains(scope: JobSourceScope): string[] {
 
 export function getActiveDiscoveryDomains(scope: JobSourceScope): string[] {
   const domains = getSourceProfiles(scope)
-    .filter((source) => source.type === 'ats')
+    .filter((source) => source.activeDiscovery)
     .flatMap((source) => source.domains)
 
   return Array.from(new Set(domains.map((domain) => domain.toLowerCase().replace(/^www\./, ''))))
+}
+
+export function isHeavyJobSiteDomain(domain?: string | null): boolean {
+  const host = toHost(String(domain || '').trim())
+  if (!host) return false
+  return JOB_SOURCE_PROFILES.some(
+    (source) =>
+      source.heavySite &&
+      source.domains.some((candidate) => host === toHost(candidate) || host.endsWith(`.${toHost(candidate)}`)),
+  )
 }
 
 export function resolveSourceMeta(link?: string | null, sourceLabel?: string | null): ResolvedSourceMeta {

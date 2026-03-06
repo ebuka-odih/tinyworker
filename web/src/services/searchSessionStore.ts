@@ -1,10 +1,15 @@
 import { SearchCacheState, SearchResult, TimelineItem } from '../types';
 
+export type SearchSourceScope = 'global' | 'regional';
+
 export type JobSearchIntakeData = {
   roles?: string[];
   location?: string;
   visaSponsorship?: boolean;
   remote?: boolean;
+  sourceScope?: SearchSourceScope;
+  expandSearch?: boolean;
+  strictMatching?: boolean;
 };
 
 export type PersistedSearchStatus = 'running' | 'paused' | 'completed' | 'error';

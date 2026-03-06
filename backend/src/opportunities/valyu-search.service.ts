@@ -11,6 +11,7 @@ type ValyuSearchResult = {
   source?: string
   relevance_score?: number
   score?: number
+  publication_date?: string
 }
 
 type ValyuSearchResponse = {
@@ -30,6 +31,7 @@ export type ValyuDiscoveredCandidate = {
   url: string
   snippet: string
   relevance: number
+  publicationDate?: string
   sourceLabel?: string
   sourceName: string
   sourceDomain: string
@@ -41,6 +43,7 @@ export type ValyuDiscoveredCandidate = {
 export class ValyuSearchService {
   private readonly apiUrl = process.env.VALYU_API_URL || 'https://api.valyu.ai/v1/search'
   private readonly timeoutMs = Number(process.env.VALYU_API_TIMEOUT_MS || 20000)
+  private readonly maxAgeDays = Math.max(1, Number(process.env.JOB_SEARCH_MAX_AGE_DAYS || 21))
 
   async discoverJobCandidates(input: JobSearchInput): Promise<ValyuDiscoveredCandidate[]> {
     const apiKey = process.env.VALYU_API_KEY
@@ -60,6 +63,8 @@ export class ValyuSearchService {
         category: 'job opportunities',
         response_length: 'short',
         fast_mode: true,
+        start_date: this.formatDateDaysAgo(this.maxAgeDays),
+        end_date: this.formatDateDaysAgo(0),
         included_sources: input.includedSources?.length ? input.includedSources : undefined,
       })
 
@@ -74,6 +79,7 @@ export class ValyuSearchService {
           url,
           snippet: item.snippet || item.description || item.content || '',
           relevance,
+          publicationDate: item.publication_date || undefined,
           sourceLabel: item.source || undefined,
           sourceName: sourceMeta.sourceName,
           sourceDomain: sourceMeta.sourceDomain,
@@ -82,13 +88,13 @@ export class ValyuSearchService {
         })
       })
 
-      const filtered = filterAndDeduplicateDiscoveredCandidates(aggregated)
+      const filtered = filterAndDeduplicateDiscoveredCandidates(aggregated, { maxAgeDays: this.maxAgeDays })
       if (filtered.length >= input.maxNumResults) {
         return filtered
       }
     }
 
-    return filterAndDeduplicateDiscoveredCandidates(aggregated)
+    return filterAndDeduplicateDiscoveredCandidates(aggregated, { maxAgeDays: this.maxAgeDays })
   }
 
   async searchJobs(input: JobSearchInput) {
@@ -125,6 +131,15 @@ export class ValyuSearchService {
 
     const base = normalized || original
     if (base) {
+      if (this.hasSource(input.includedSources, 'linkedin.com')) {
+        variants.add(`site:linkedin.com/jobs/view ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'indeed.com')) {
+        variants.add(`site:indeed.com/viewjob ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'glassdoor.com')) {
+        variants.add(`site:glassdoor.com/job-listing ${base}`)
+      }
       if (this.hasSource(input.includedSources, 'greenhouse.io') || this.hasSource(input.includedSources, 'boards.greenhouse.io')) {
         variants.add(`site:greenhouse.io ${base}`)
         variants.add(`site:boards.greenhouse.io ${base}`)
@@ -135,6 +150,9 @@ export class ValyuSearchService {
       if (this.hasSource(input.includedSources, 'ashbyhq.com')) {
         variants.add(`site:ashbyhq.com ${base}`)
       }
+      if (this.hasSource(input.includedSources, 'djinni.co')) {
+        variants.add(`site:djinni.co/jobs ${base}`)
+      }
     }
 
     return Array.from(variants).filter(Boolean)
@@ -143,6 +161,13 @@ export class ValyuSearchService {
   private hasSource(includedSources: string[] | undefined, domain: string): boolean {
     if (!includedSources?.length) return true
     return includedSources.some((item) => item === domain)
+  }
+
+  private formatDateDaysAgo(daysAgo: number): string {
+    const date = new Date()
+    date.setUTCHours(0, 0, 0, 0)
+    date.setUTCDate(date.getUTCDate() - Math.max(0, daysAgo))
+    return date.toISOString().slice(0, 10)
   }
 
   private async executeValyuSearch(apiKey: string, body: Record<string, unknown>): Promise<ValyuSearchResult[]> {

@@ -4,6 +4,7 @@ import {
   deriveCandidateJobDetails,
   extractedTitleLooksValid,
   filterAndDeduplicateDiscoveredCandidates,
+  isRecentJobPostingValue,
   normalizeDiscoveryQuery,
   rankSearchRunResults,
 } from './job-search-candidate.utils'
@@ -69,6 +70,41 @@ describe('job-search candidate utils', () => {
     expect(filtered).toHaveLength(1)
     expect(filtered[0]?.title).toBe('AI Engineer (Backend)')
     expect(filtered[0]?.url).toBe('https://www.indeed.com/viewjob?jk=abc123')
+  })
+
+  it('filters out stale discovered candidates by publication date', () => {
+    const filtered = filterAndDeduplicateDiscoveredCandidates(
+      [
+        {
+          id: 'old-job',
+          title: 'Staff Backend Engineer',
+          url: 'https://jobs.lever.co/acme/old-role',
+          snippet: 'Older role still indexed.',
+          relevance: 0.8,
+          publicationDate: '2024-01-01',
+          sourceName: 'Lever',
+          sourceDomain: 'jobs.lever.co',
+          sourceType: 'ats',
+          sourceVerified: true,
+        },
+        {
+          id: 'fresh-job',
+          title: 'Staff Backend Engineer',
+          url: 'https://jobs.lever.co/acme/fresh-role',
+          snippet: 'Recent role.',
+          relevance: 0.85,
+          publicationDate: new Date().toISOString().slice(0, 10),
+          sourceName: 'Lever',
+          sourceDomain: 'jobs.lever.co',
+          sourceType: 'ats',
+          sourceVerified: true,
+        },
+      ],
+      { maxAgeDays: 21 },
+    )
+
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.id).toBe('fresh-job')
   })
 
   it('deduplicates final ready results by extracted title, organization, and location', () => {
@@ -165,6 +201,43 @@ describe('job-search candidate utils', () => {
   it('normalizes generic any-location discovery queries', () => {
     expect(normalizeDiscoveryQuery('backend engineer jobs in Any location')).toBe('backend engineer')
     expect(normalizeDiscoveryQuery('backend engineer jobs in Berlin')).toBe('backend engineer in Berlin')
+  })
+
+  it('recognizes common recent age strings and rejects old ones', () => {
+    expect(isRecentJobPostingValue('2 days ago', 21)).toBe(true)
+    expect(isRecentJobPostingValue('13d', 21)).toBe(true)
+    expect(isRecentJobPostingValue('2 years ago', 21)).toBe(false)
+    expect(isRecentJobPostingValue('2y', 21)).toBe(false)
+  })
+
+  it('filters Djinni listing pages while allowing specific Djinni job details', () => {
+    const filtered = filterAndDeduplicateDiscoveredCandidates([
+      {
+        id: 'djinni-listing',
+        title: 'Python jobs in Ukraine',
+        url: 'https://djinni.co/jobs/?primary_keyword=python',
+        snippet: 'Search page',
+        relevance: 0.7,
+        sourceName: 'Djinni',
+        sourceDomain: 'djinni.co',
+        sourceType: 'job_board',
+        sourceVerified: true,
+      },
+      {
+        id: 'djinni-detail',
+        title: 'Senior Backend Engineer',
+        url: 'https://djinni.co/jobs/787654-senior-backend-engineer/',
+        snippet: 'Fresh role · 2d',
+        relevance: 0.9,
+        sourceName: 'Djinni',
+        sourceDomain: 'djinni.co',
+        sourceType: 'job_board',
+        sourceVerified: true,
+      },
+    ])
+
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.id).toBe('djinni-detail')
   })
 
   it('derives role and organization from ATS-style candidate titles', () => {

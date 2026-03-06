@@ -42,6 +42,8 @@ const BLOCKED_TERMINAL_SEGMENTS = new Set([
   'vacancies',
 ])
 
+const MAX_ALLOWED_AGE_DAYS_FALLBACK = 21
+
 function normalizeText(value: string | undefined | null): string {
   return String(value || '')
     .trim()
@@ -78,6 +80,59 @@ function hasBlockedSearchParams(url: URL): boolean {
   return false
 }
 
+function asValidDate(value: string): Date | null {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed
+}
+
+function ageInDaysSince(date: Date): number {
+  return Math.floor((Date.now() - date.getTime()) / 86_400_000)
+}
+
+function parseRelativeAgeToken(value: string): number | null {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) return null
+
+  const compactMatch = normalized.match(/(?:^|[\s•·|,;:()\-])(\d+)\s*(m|h|d|w|mo|y)(?:[\s•·|,;:()\-]|$)/i)
+  if (compactMatch) {
+    const amount = Number(compactMatch[1] || 0)
+    const unit = String(compactMatch[2] || '').toLowerCase()
+    if (unit === 'm' || unit === 'h') return 0
+    if (unit === 'd') return amount
+    if (unit === 'w') return amount * 7
+    if (unit === 'mo') return amount * 30
+    if (unit === 'y') return amount * 365
+  }
+
+  const longMatch = normalized.match(/\b(\d+)\s+(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)\s+ago\b/i)
+  if (longMatch) {
+    const amount = Number(longMatch[1] || 0)
+    const unit = String(longMatch[2] || '').toLowerCase()
+    if (unit.startsWith('minute') || unit.startsWith('hour')) return 0
+    if (unit.startsWith('day')) return amount
+    if (unit.startsWith('week')) return amount * 7
+    if (unit.startsWith('month')) return amount * 30
+    if (unit.startsWith('year')) return amount * 365
+  }
+
+  return null
+}
+
+export function isRecentJobPostingValue(value: string | undefined | null, maxAgeDays = MAX_ALLOWED_AGE_DAYS_FALLBACK): boolean {
+  const normalized = String(value || '').trim()
+  if (!normalized) return true
+
+  const directDate = asValidDate(normalized)
+  if (directDate) {
+    return ageInDaysSince(directDate) <= maxAgeDays
+  }
+
+  const relativeAgeDays = parseRelativeAgeToken(normalized)
+  if (relativeAgeDays == null) return true
+  return relativeAgeDays <= maxAgeDays
+}
+
 function isLinkedInJobUrl(url: URL): boolean {
   return /^\/jobs\/view\/[^/]+\/?$/.test(url.pathname.toLowerCase())
 }
@@ -112,6 +167,15 @@ function isAshbyJobUrl(url: URL): boolean {
   const segments = getPathSegments(url)
   const jobIndex = segments.indexOf('job')
   return jobIndex >= 0 && Boolean(segments[jobIndex + 1])
+}
+
+function isDjinniJobUrl(url: URL): boolean {
+  const segments = getPathSegments(url)
+  if (segments[0] !== 'jobs') return false
+  if (!segments[1]) return false
+  const second = segments[1]
+  if (second.startsWith('l-') || second.startsWith('keyword-') || second.startsWith('company-')) return false
+  return /^\d+[-a-z0-9]*$/i.test(second)
 }
 
 function isGenericJobUrl(url: URL): boolean {
@@ -175,6 +239,7 @@ export function isLikelyJobPostingCandidate(candidate: Pick<ValyuDiscoveredCandi
     if (host.endsWith('greenhouse.io')) return isGreenhouseJobUrl(parsed)
     if (host.endsWith('lever.co')) return isLeverJobUrl(parsed)
     if (host.endsWith('ashbyhq.com')) return isAshbyJobUrl(parsed)
+    if (host.endsWith('djinni.co')) return isDjinniJobUrl(parsed)
     return isGenericJobUrl(parsed)
   } catch {
     return false
@@ -211,13 +276,16 @@ function discoveryScore(candidate: ValyuDiscoveredCandidate): number {
 
 export function filterAndDeduplicateDiscoveredCandidates(
   candidates: ValyuDiscoveredCandidate[],
+  options?: { maxAgeDays?: number },
 ): ValyuDiscoveredCandidate[] {
   const byCanonicalUrl = new Map<string, ValyuDiscoveredCandidate>()
+  const maxAgeDays = Math.max(1, Number(options?.maxAgeDays || MAX_ALLOWED_AGE_DAYS_FALLBACK))
 
   for (const candidate of candidates) {
     const canonicalUrl = canonicalizeJobUrl(candidate.url)
     if (!canonicalUrl) continue
     if (!isLikelyJobPostingCandidate(candidate)) continue
+    if (!isRecentJobPostingValue(candidate.publicationDate, maxAgeDays)) continue
 
     const normalized: ValyuDiscoveredCandidate = {
       ...candidate,
@@ -233,7 +301,7 @@ export function filterAndDeduplicateDiscoveredCandidates(
   return Array.from(byCanonicalUrl.values()).sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
 }
 
-function resultIdentityKey(item: SearchRunResultItem): string {
+export function searchRunResultIdentityKey(item: SearchRunResultItem): string {
   const title = normalizeText(item.title)
   const organization = normalizeText(item.organization)
   if (!title || !organization) return `id:${item.id}`
@@ -273,7 +341,7 @@ export function deduplicateReadyResults(results: SearchRunResultItem[]): SearchR
   const byIdentity = new Map<string, SearchRunResultItem>()
 
   for (const result of results) {
-    const key = resultIdentityKey(result)
+    const key = searchRunResultIdentityKey(result)
     const existing = byIdentity.get(key)
     if (!existing || readyResultScore(result) > readyResultScore(existing)) {
       byIdentity.set(key, result)

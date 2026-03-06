@@ -7,6 +7,8 @@ export enum SearchType {
 export interface AuthUser {
   userId: string;
   email: string;
+  subscriptionTier?: string;
+  isPro?: boolean;
 }
 
 export type TimelineSeverity = 'info' | 'success' | 'warning' | 'error';
@@ -72,6 +74,11 @@ export interface SearchResult {
   requirements?: string[];
   responsibilities?: string[];
   benefits?: string[];
+  seenOn?: Array<{
+    sourceName: string;
+    sourceDomain: string;
+    sourceVerified: boolean;
+  }>;
 }
 
 export interface SavedOpportunity {
