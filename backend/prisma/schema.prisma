@@ -188,3 +188,68 @@ model TelegramReport {
 
   @@index([chatId, createdAt])
 }
+
+model JobSearchRun {
+  id          String   @id @default(uuid())
+  query       String
+  queryHash   String
+  countryCode String?
+  sourceScope String   @default("global")
+  status      String   @default("running") // running|completed|failed|stopped
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  stoppedAt   DateTime?
+  lastSequence Int     @default(0)
+  totalQueued  Int     @default(0)
+  totalReady   Int     @default(0)
+  totalFailed  Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  events      JobSearchRunEvent[]
+
+  @@index([queryHash, startedAt])
+  @@index([status, startedAt])
+}
+
+model JobSearchRunEvent {
+  id        String   @id @default(uuid())
+  runId     String
+  sequence  Int
+  type      String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  run JobSearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([runId, createdAt])
+}
+
+model JobExtractionCache {
+  id               String   @id @default(uuid())
+  canonicalUrlHash String   @unique
+  canonicalUrl     String
+  sourceName       String?
+  sourceDomain     String?
+  payload          Json
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+model JobQueryCache {
+  id          String   @id @default(uuid())
+  queryHash   String   @unique
+  query       String
+  countryCode String?
+  sourceScope String   @default("global")
+  payload     Json
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([expiresAt])
+}

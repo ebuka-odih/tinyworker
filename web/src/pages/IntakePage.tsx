@@ -81,10 +81,14 @@ const searchTypeOptions: Array<{
 const roleSuggestions = [
   'Backend Engineer',
   'Full Stack Developer',
-  'DevOps Engineer',
-  'Cloud Architect',
-  'Data Engineer',
-  'Platform Engineer',
+  'Product Manager',
+  'Operations Analyst',
+  'Customer Success Specialist',
+  'Business Analyst',
+  'Communication',
+  'Leadership',
+  'Problem Solving',
+  'Teamwork',
 ];
 
 const locationOptions = [
@@ -296,7 +300,7 @@ export function IntakePage() {
                         addRole(tagInput);
                       }
                     }}
-                    placeholder="e.g. Backend Engineer, DevOps Engineer"
+                    placeholder="e.g. Backend Engineer, Product Manager, Communication"
                     className="w-full sm:flex-1 px-4 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all"
                   />
                   <button
@@ -309,7 +313,7 @@ export function IntakePage() {
                 </div>
 
                 <div>
-                  <p className="text-xs uppercase tracking-widest font-bold text-neutral-400 mb-2">Quick options</p>
+                  <p className="text-xs uppercase tracking-widest font-bold text-neutral-400 mb-2">Quick options (roles + soft skills)</p>
                   <div className="flex flex-wrap gap-2">
                     {roleSuggestions.map((role) => {
                       const selected = formData.roles.includes(role);

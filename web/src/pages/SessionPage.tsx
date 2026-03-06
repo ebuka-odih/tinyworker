@@ -1,10 +1,9 @@
 import React from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import {
   Play,
   Pause,
   Square,
-  ChevronRight,
   ExternalLink,
   Bookmark,
   CheckCircle2,
@@ -13,10 +12,19 @@ import {
   Globe,
   Search,
   AlertCircle,
+  Eye,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { TimelineItem, SearchResult, TimelineSeverity, TimelineStatus } from '../types';
+import { AnimatePresence, motion } from 'motion/react';
+import { JobQueueStatus, SearchResult, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
 import { searchJobs } from '../services/jobSearchApi';
+import {
+  SearchRunEvent,
+  connectJobSearchRunStream,
+  getJobSearchRunSnapshot,
+  startJobSearchRun,
+  stopJobSearchRun,
+} from '../services/jobSearchStreamApi';
+import { JobDetailsModal } from '../components/JobDetailsModal';
 
 type IntakeData = {
   roles?: string[];
@@ -29,16 +37,7 @@ type SessionLocationState = {
   formData?: IntakeData;
 };
 
-type SearchPhase = 'initializing' | 'fetching' | 'post-processing' | 'completed' | 'error';
-type AbortReason = 'pause' | 'stop' | 'timeout' | 'cleanup';
-
-type AddTimelineEventOptions = {
-  details?: string;
-  detailLines?: string[];
-  status?: TimelineStatus;
-  severity?: TimelineSeverity;
-  isExpanded?: boolean;
-};
+type SearchPhase = 'initializing' | 'streaming' | 'completed' | 'error';
 
 const COUNTRY_CODES: Record<string, string> = {
   Germany: 'DE',
@@ -47,6 +46,8 @@ const COUNTRY_CODES: Record<string, string> = {
   'United States': 'US',
   Netherlands: 'NL',
 };
+
+const MAX_SEARCH_RUNTIME_MS = 90_000;
 
 const FALLBACK_RESULTS: SearchResult[] = [
   {
@@ -58,6 +59,12 @@ const FALLBACK_RESULTS: SearchResult[] = [
     tags: ['Visa Sponsorship', 'Hybrid', 'Senior'],
     link: '#',
     status: 'new',
+    sourceName: 'LinkedIn Jobs',
+    sourceDomain: 'linkedin.com',
+    sourceType: 'job_board',
+    sourceVerified: true,
+    queueStatus: 'ready',
+    snippet: 'Fallback sample role for local preview when live data is unavailable.',
   },
   {
     id: 'fallback-2',
@@ -68,24 +75,49 @@ const FALLBACK_RESULTS: SearchResult[] = [
     tags: ['Visa Sponsorship', 'On-site', 'Mid-level'],
     link: '#',
     status: 'new',
-  },
-  {
-    id: 'fallback-3',
-    title: 'Cloud Architect',
-    organization: 'DataScale',
-    location: 'Remote (Germany)',
-    fitScore: 'High',
-    tags: ['Remote', 'High Salary', 'Senior'],
-    link: '#',
-    status: 'new',
+    sourceName: 'Indeed',
+    sourceDomain: 'indeed.com',
+    sourceType: 'job_board',
+    sourceVerified: true,
+    queueStatus: 'ready',
+    snippet: 'Fallback sample role for local preview when live data is unavailable.',
   },
 ];
 
-const INITIAL_EVENT_DELAY_MS = 700;
-const KEYWORD_EVENT_DELAY_MS = 1600;
-const QUERY_EVENT_DELAY_MS = 2600;
-const FETCH_DELAY_MS = 3200;
-const MAX_SEARCH_RUNTIME_MS = 90_000;
+function fitClass(fit: SearchResult['fitScore']) {
+  if (fit === 'High') return 'bg-emerald-50 text-emerald-600';
+  if (fit === 'Medium') return 'bg-amber-50 text-amber-600';
+  return 'bg-orange-50 text-orange-600';
+}
+
+function queueClass(status: JobQueueStatus) {
+  if (status === 'queued') return 'bg-neutral-100 text-neutral-600';
+  if (status === 'extracting') return 'bg-sky-50 text-sky-700';
+  if (status === 'verified') return 'bg-emerald-50 text-emerald-700';
+  if (status === 'ready') return 'bg-emerald-50 text-emerald-700';
+  return 'bg-red-50 text-red-700';
+}
+
+function queueLabel(status: JobQueueStatus) {
+  if (status === 'queued') return 'Queued';
+  if (status === 'extracting') return 'Extracting';
+  if (status === 'verified') return 'Verified';
+  if (status === 'ready') return 'Ready';
+  return 'Failed';
+}
+
+function sourceFromLink(link: string | undefined, fallback: string | undefined): { sourceName: string; sourceDomain: string } {
+  if (fallback) {
+    return { sourceName: fallback, sourceDomain: fallback.toLowerCase().replace(/\s+/g, '') };
+  }
+  if (!link) return { sourceName: 'Verified Web Source', sourceDomain: 'web' };
+  try {
+    const host = new URL(link).hostname.replace(/^www\./, '');
+    return { sourceName: host, sourceDomain: host };
+  } catch {
+    return { sourceName: 'Verified Web Source', sourceDomain: 'web' };
+  }
+}
 
 export function SessionPage() {
   const { id } = useParams<{ id: string }>();
@@ -94,8 +126,8 @@ export function SessionPage() {
   const formData = state.formData || {};
   const roles = formData.roles || [];
   const primaryRole = roles[0] || 'Backend Roles';
-  const locationLabel = formData.location || 'Global';
-  const countryCode = formData.location ? COUNTRY_CODES[formData.location] : undefined;
+  const locationLabel = formData.location || 'Any location';
+  const countryCode = formData.location && formData.location !== 'Any location' ? COUNTRY_CODES[formData.location] : undefined;
   const searchQuery = React.useMemo(() => {
     const rolePart = roles.length ? roles.join(' OR ') : 'backend engineer';
     const sponsorshipPart = formData.visaSponsorship ? 'with visa sponsorship' : '';
@@ -103,264 +135,289 @@ export function SessionPage() {
     return [rolePart, 'jobs in', locationLabel, sponsorshipPart, remotePart].filter(Boolean).join(' ');
   }, [roles, formData.visaSponsorship, formData.remote, locationLabel]);
 
-  const [status, setStatus] = React.useState<'running' | 'paused' | 'completed'>('running');
+  const [status, setStatus] = React.useState<'running' | 'paused' | 'completed' | 'error'>('running');
   const [searchPhase, setSearchPhase] = React.useState<SearchPhase>('initializing');
-  const [hasCompletedSearch, setHasCompletedSearch] = React.useState(false);
   const [elapsedTime, setElapsedTime] = React.useState(0);
   const [timeline, setTimeline] = React.useState<TimelineItem[]>([]);
   const [results, setResults] = React.useState<SearchResult[]>([]);
   const [activeTab, setActiveTab] = React.useState<'all' | 'shortlisted' | 'saved'>('all');
+  const [runId, setRunId] = React.useState<string | null>(null);
+  const [selectedJob, setSelectedJob] = React.useState<SearchResult | null>(null);
 
-  const runIdRef = React.useRef(0);
-  const fetchControllerRef = React.useRef<AbortController | null>(null);
-  const abortReasonRef = React.useRef<AbortReason | null>(null);
-  const scheduledTimeoutsRef = React.useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const streamRef = React.useRef<{ close: () => void } | null>(null);
+  const isPausedRef = React.useRef(false);
+  const isCompletedRef = React.useRef(false);
+  const eventQueueRef = React.useRef<SearchRunEvent[]>([]);
+  const lastSequenceRef = React.useRef(0);
   const runtimeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasStartedRef = React.useRef(false);
 
-  const clearScheduledTimeouts = React.useCallback(() => {
-    scheduledTimeoutsRef.current.forEach(clearTimeout);
-    scheduledTimeoutsRef.current = [];
-
+  const clearStream = React.useCallback(() => {
+    streamRef.current?.close();
+    streamRef.current = null;
     if (runtimeTimeoutRef.current) {
       clearTimeout(runtimeTimeoutRef.current);
       runtimeTimeoutRef.current = null;
     }
   }, []);
 
-  const abortInFlightFetch = React.useCallback((reason: AbortReason) => {
-    if (!fetchControllerRef.current) return;
-
-    if (!abortReasonRef.current || reason !== 'cleanup') {
-      abortReasonRef.current = reason;
-    }
-
-    fetchControllerRef.current.abort();
-    fetchControllerRef.current = null;
-  }, []);
-
-  const addTimelineEvent = React.useCallback((title: string, description: string, options: AddTimelineEventOptions = {}) => {
+  const addTimelineEvent = React.useCallback((title: string, description: string, severity: TimelineSeverity = 'info', eventStatus: TimelineStatus = 'running') => {
     setTimeline((prev) => [
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         title,
         description,
-        details: options.details,
-        detailLines: options.detailLines,
-        status: options.status,
-        severity: options.severity,
-        isExpanded: options.isExpanded,
+        severity,
+        status: eventStatus,
       },
       ...prev,
     ]);
   }, []);
 
-  const toggleTimelineDetails = React.useCallback((itemId: string) => {
-    setTimeline((prev) => prev.map((item) => (item.id === itemId ? { ...item, isExpanded: !item.isExpanded } : item)));
+  const upsertResult = React.useCallback((incoming: SearchResult) => {
+    setResults((prev) => {
+      const next = [...prev];
+      const existingIndex = next.findIndex((item) => item.id === incoming.id);
+      if (existingIndex >= 0) {
+        next[existingIndex] = { ...next[existingIndex], ...incoming };
+      } else {
+        next.push(incoming);
+      }
+      return next.sort((a, b) => {
+        const ap = typeof a.queuePosition === 'number' ? a.queuePosition : Number.MAX_SAFE_INTEGER;
+        const bp = typeof b.queuePosition === 'number' ? b.queuePosition : Number.MAX_SAFE_INTEGER;
+        if (ap !== bp) return ap - bp;
+        return (b.relevance || 0) - (a.relevance || 0);
+      });
+    });
   }, []);
+
+  const applyRunEvent = React.useCallback(
+    (event: SearchRunEvent) => {
+      if (!event) return;
+      lastSequenceRef.current = Math.max(lastSequenceRef.current, Number(event.sequence || 0));
+
+      if (event.type === 'run_started') {
+        setSearchPhase('streaming');
+        addTimelineEvent('Initializing search agent', 'Preparing verified sources and extraction queue.', 'info', 'running');
+        return;
+      }
+
+      if (event.type === 'source_scan_started') {
+        addTimelineEvent('Scanning verified job sources', 'Discovery phase started across trusted job websites.', 'info', 'running');
+        return;
+      }
+
+      if (event.type === 'candidate_queued' && event.payload?.result) {
+        const item = event.payload.result as SearchResult;
+        upsertResult(item);
+        addTimelineEvent('Opportunity queued', `${item.title} from ${item.sourceName} is queued for extraction.`, 'info', 'queued');
+        return;
+      }
+
+      if (event.type === 'candidate_extracting' && event.payload?.result) {
+        const item = event.payload.result as SearchResult;
+        upsertResult(item);
+        addTimelineEvent('Extracting job details', `Extracting structured fields from ${item.sourceName}.`, 'info', 'running');
+        return;
+      }
+
+      if (event.type === 'candidate_ready' && event.payload?.result) {
+        const item = event.payload.result as SearchResult;
+        upsertResult(item);
+        addTimelineEvent('Job card ready', `${item.title} is ready from ${item.sourceName}.`, 'success', 'completed');
+        return;
+      }
+
+      if (event.type === 'candidate_failed' && event.payload?.result) {
+        const item = event.payload.result as SearchResult;
+        upsertResult(item);
+        addTimelineEvent('Source extraction failed', `Could not extract full details for ${item.title}.`, 'warning', 'failed');
+        return;
+      }
+
+      if (event.type === 'run_progress') {
+        const ready = Number(event.payload?.ready || 0);
+        const failed = Number(event.payload?.failed || 0);
+        addTimelineEvent('Search progress', `${ready} ready • ${failed} failed`, 'info', 'running');
+        return;
+      }
+
+      if (event.type === 'run_completed') {
+        addTimelineEvent('Search completed', 'Queue finished and results are now stable.', 'success', 'completed');
+        setStatus('completed');
+        setSearchPhase('completed');
+        isCompletedRef.current = true;
+        clearStream();
+        return;
+      }
+
+      if (event.type === 'run_stopped') {
+        addTimelineEvent('Search stopped', 'Run was stopped manually.', 'warning', 'completed');
+        setStatus('completed');
+        setSearchPhase('completed');
+        isCompletedRef.current = true;
+        clearStream();
+        return;
+      }
+
+      if (event.type === 'run_error') {
+        const details = String(event.payload?.message || 'Unknown search error');
+        addTimelineEvent('Search error', details, 'error', 'failed');
+        setStatus('error');
+        setSearchPhase('error');
+        isCompletedRef.current = true;
+        clearStream();
+      }
+    },
+    [addTimelineEvent, clearStream, upsertResult],
+  );
+
+  const flushQueuedEvents = React.useCallback(() => {
+    const queued = eventQueueRef.current;
+    if (!queued.length) return;
+    eventQueueRef.current = [];
+    queued.forEach((event) => applyRunEvent(event));
+  }, [applyRunEvent]);
+
+  const connectToRunStream = React.useCallback(
+    (searchRunId: string) => {
+      clearStream();
+      streamRef.current = connectJobSearchRunStream({
+        runId: searchRunId,
+        since: lastSequenceRef.current,
+        onEvent: (event) => {
+          const seq = Number(event.sequence || 0);
+          if (seq && seq <= lastSequenceRef.current) return;
+          if (isPausedRef.current) {
+            eventQueueRef.current.push(event);
+            return;
+          }
+          applyRunEvent(event);
+        },
+        onSnapshot: (snapshot) => {
+          const snapshotResults = Array.isArray(snapshot.results) ? snapshot.results : [];
+          if (snapshotResults.length) setResults(snapshotResults);
+          if (snapshot.status === 'completed' || snapshot.status === 'stopped' || snapshot.status === 'failed') {
+            setStatus(snapshot.status === 'failed' ? 'error' : 'completed');
+            setSearchPhase(snapshot.status === 'failed' ? 'error' : 'completed');
+            isCompletedRef.current = true;
+          }
+        },
+        onError: () => {
+          if (isCompletedRef.current) return;
+          addTimelineEvent('Stream reconnecting', 'Live updates interrupted. Trying to reconnect.', 'warning', 'running');
+        },
+      });
+    },
+    [addTimelineEvent, applyRunEvent, clearStream],
+  );
+
+  const runFallbackSearch = React.useCallback(async () => {
+    addTimelineEvent('Streaming unavailable', 'Falling back to direct API search mode.', 'warning', 'running');
+    try {
+      const fetched = await searchJobs({
+        query: searchQuery,
+        countryCode,
+        maxNumResults: 12,
+      });
+      const mapped = fetched.map((item, index) => {
+        const source = sourceFromLink(item.link, item.sourceName || item.organization);
+        return {
+          ...item,
+          sourceName: item.sourceName || source.sourceName,
+          sourceDomain: item.sourceDomain || source.sourceDomain,
+          sourceType: item.sourceType || 'job_board',
+          sourceVerified: item.sourceVerified ?? true,
+          queueStatus: item.queueStatus || 'ready',
+          queuePosition: index + 1,
+        } satisfies SearchResult;
+      });
+      setResults(mapped.length ? mapped : FALLBACK_RESULTS);
+      setStatus('completed');
+      setSearchPhase('completed');
+      isCompletedRef.current = true;
+      addTimelineEvent('Fallback search completed', `${mapped.length || FALLBACK_RESULTS.length} opportunities loaded.`, 'success', 'completed');
+    } catch (error) {
+      setResults(FALLBACK_RESULTS);
+      setStatus('error');
+      setSearchPhase('error');
+      isCompletedRef.current = true;
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      addTimelineEvent('Fallback failed', message, 'error', 'failed');
+    }
+  }, [addTimelineEvent, countryCode, searchQuery]);
 
   React.useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
-    if (status === 'running' && !hasCompletedSearch) {
+    if (status === 'running' && !isCompletedRef.current) {
       timer = setInterval(() => {
         setElapsedTime((prev) => prev + 1);
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [status, hasCompletedSearch]);
+  }, [status]);
 
   React.useEffect(() => {
-    if (status !== 'running' || hasCompletedSearch) return;
+    isPausedRef.current = status === 'paused';
+  }, [status]);
 
-    const currentRunId = runIdRef.current + 1;
-    runIdRef.current = currentRunId;
-    abortReasonRef.current = null;
+  React.useEffect(() => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+    isCompletedRef.current = false;
+    eventQueueRef.current = [];
 
-    clearScheduledTimeouts();
-    abortInFlightFetch('cleanup');
-    setSearchPhase('initializing');
-    setResults([]);
-
-    const schedule = (cb: () => void, delay: number) => {
-      const timeout = setTimeout(() => {
-        if (runIdRef.current !== currentRunId) return;
-        cb();
-      }, delay);
-      scheduledTimeoutsRef.current.push(timeout);
-    };
-
-    schedule(() => {
-      addTimelineEvent('Initializing search agent', `Setting up workspace for ${primaryRole} search in ${locationLabel}.`, {
-        status: 'running',
-        severity: 'info',
-        details: 'Workspace context initialized for this session.',
-        detailLines: [`Session ID: ${id || 'unknown'}`, `Role focus: ${primaryRole}`, `Location target: ${locationLabel}`],
-      });
-    }, INITIAL_EVENT_DELAY_MS);
-
-    schedule(() => {
-      addTimelineEvent('Extracting keywords from CV', `Target roles: ${roles.join(', ') || primaryRole}.`, {
-        status: 'running',
-        severity: 'info',
-        details: 'Profile and role signals extracted from intake and CV.',
-        detailLines: [
-          `Primary role: ${primaryRole}`,
-          `Visa sponsorship required: ${formData.visaSponsorship ? 'Yes' : 'No'}`,
-          `Remote preference: ${formData.remote ? 'Yes' : 'No'}`,
-        ],
-      });
-    }, KEYWORD_EVENT_DELAY_MS);
-
-    schedule(() => {
-      addTimelineEvent('Querying Valyu Search API', `Searching: "${searchQuery}".`, {
-        status: 'running',
-        severity: 'info',
-        details: 'Live search request sent to Valyu API.',
-        detailLines: [
-          `Query: ${searchQuery}`,
-          `Country code: ${countryCode || 'Global'}`,
-          'Source: Valyu web search',
-          'Max results: 12',
-        ],
-      });
-    }, QUERY_EVENT_DELAY_MS);
-
-    runtimeTimeoutRef.current = setTimeout(() => {
-      if (runIdRef.current !== currentRunId) return;
-      abortInFlightFetch('timeout');
-    }, MAX_SEARCH_RUNTIME_MS);
-
-    schedule(async () => {
-      if (runIdRef.current !== currentRunId) return;
-
-      setSearchPhase('fetching');
-      const controller = new AbortController();
-      fetchControllerRef.current = controller;
-
+    const start = async () => {
+      setSearchPhase('initializing');
+      addTimelineEvent('Starting search run', `Running: "${searchQuery}"`, 'info', 'running');
       try {
-        const fetched = await searchJobs({
+        const started = await startJobSearchRun({
           query: searchQuery,
           countryCode,
           maxNumResults: 12,
-          signal: controller.signal,
+          sourceScope: 'global',
+          remote: formData.remote,
+          visaSponsorship: formData.visaSponsorship,
         });
+        setRunId(started.runId);
+        connectToRunStream(started.runId);
 
-        if (runIdRef.current !== currentRunId) return;
-
-        setSearchPhase('post-processing');
-
-        const usedFallback = fetched.length === 0;
-        const nextResults = usedFallback ? FALLBACK_RESULTS : fetched;
-
-        setResults(nextResults);
-
-        addTimelineEvent(
-          usedFallback ? 'No live opportunities returned' : `Found ${nextResults.length} potential matches`,
-          usedFallback
-            ? 'Valyu returned no opportunities. Showing cached sample opportunities for this session.'
-            : 'Filtering results by relevance and ranking opportunities.',
-          {
-            status: 'running',
-            severity: usedFallback ? 'warning' : 'success',
-            details: usedFallback
-              ? 'Fallback mode was used because no opportunities were returned by live search.'
-              : 'Live opportunities returned successfully and rendered.',
-            detailLines: [
-              `Query: ${searchQuery}`,
-              `Country code: ${countryCode || 'Global'}`,
-              `Live results: ${fetched.length}`,
-              `Fallback used: ${usedFallback ? 'Yes' : 'No'}`,
-            ],
-            isExpanded: usedFallback,
-          },
-        );
-
-        addTimelineEvent('Ranking opportunities', 'Calculated fit score based on title and source relevance.', {
-          status: 'completed',
-          severity: 'success',
-          details: 'Ranking completed for visible opportunities.',
-          detailLines: [
-            `Displayed results: ${nextResults.length}`,
-            `Top role: ${nextResults[0]?.title || 'N/A'}`,
-            `Top fit: ${nextResults[0]?.fitScore || 'N/A'}`,
-          ],
-        });
-
-        setSearchPhase('completed');
-        setStatus('completed');
-        setHasCompletedSearch(true);
-      } catch (error) {
-        if (runIdRef.current !== currentRunId) return;
-
-        const abortReason = abortReasonRef.current;
-        abortReasonRef.current = null;
-
-        if (abortReason === 'pause' || abortReason === 'stop' || abortReason === 'cleanup') {
-          return;
-        }
-
-        setResults(FALLBACK_RESULTS);
-
-        if (abortReason === 'timeout') {
-          setSearchPhase('error');
-          addTimelineEvent('Search request timed out', 'Live search exceeded the runtime limit. Fallback opportunities were loaded.', {
-            status: 'failed',
-            severity: 'error',
-            details: `Timed out after ${Math.round(MAX_SEARCH_RUNTIME_MS / 1000)} seconds.`,
-            detailLines: [
-              `Query: ${searchQuery}`,
-              `Country code: ${countryCode || 'Global'}`,
-              'Action: fallback opportunities shown',
-            ],
-            isExpanded: true,
-          });
+        runtimeTimeoutRef.current = setTimeout(async () => {
+          if (isCompletedRef.current) return;
+          addTimelineEvent('Run timeout', `Run exceeded ${Math.round(MAX_SEARCH_RUNTIME_MS / 1000)} seconds and was stopped.`, 'warning', 'failed');
+          if (started.runId) {
+            try {
+              await stopJobSearchRun(started.runId);
+            } catch {
+              // Ignore stop errors at timeout boundary.
+            }
+          }
           setStatus('completed');
-          setHasCompletedSearch(true);
-          return;
-        }
-
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        setSearchPhase('error');
-        addTimelineEvent('Valyu API unavailable', 'Falling back to cached sample opportunities for this session.', {
-          status: 'failed',
-          severity: 'warning',
-          details: message,
-          detailLines: [
-            `Query: ${searchQuery}`,
-            `Country code: ${countryCode || 'Global'}`,
-            'Action: fallback opportunities shown',
-          ],
-          isExpanded: true,
-        });
-
-        setStatus('completed');
-        setHasCompletedSearch(true);
-      } finally {
-        if (runIdRef.current === currentRunId) {
-          fetchControllerRef.current = null;
-          clearScheduledTimeouts();
-        }
+          setSearchPhase('completed');
+          isCompletedRef.current = true;
+          clearStream();
+        }, MAX_SEARCH_RUNTIME_MS);
+      } catch {
+        await runFallbackSearch();
       }
-    }, FETCH_DELAY_MS);
+    };
+
+    void start();
 
     return () => {
-      clearScheduledTimeouts();
-      abortInFlightFetch('cleanup');
+      clearStream();
     };
   }, [
-    status,
-    hasCompletedSearch,
-    clearScheduledTimeouts,
-    abortInFlightFetch,
     addTimelineEvent,
-    searchQuery,
+    clearStream,
+    connectToRunStream,
     countryCode,
-    primaryRole,
-    locationLabel,
-    roles,
-    formData.visaSponsorship,
     formData.remote,
-    id,
+    formData.visaSponsorship,
+    runFallbackSearch,
+    searchQuery,
   ]);
 
   const formatTime = (seconds: number) => {
@@ -370,59 +427,40 @@ export function SessionPage() {
   };
 
   const handlePause = () => {
-    if (status !== 'running' || hasCompletedSearch) return;
-
-    runIdRef.current += 1;
-    clearScheduledTimeouts();
-    abortInFlightFetch('pause');
-
+    if (status !== 'running' || isCompletedRef.current) return;
     setStatus('paused');
-    setSearchPhase('initializing');
-
-    addTimelineEvent('Search paused', 'Live search has been paused. Resume to continue.', {
-      status: 'queued',
-      severity: 'warning',
-      details: 'The in-flight request was canceled by user action.',
-      detailLines: [`Elapsed: ${formatTime(elapsedTime)}`, `Results so far: ${results.length}`],
-    });
+    addTimelineEvent('Search paused', 'Incoming stream updates are queued until resume.', 'warning', 'queued');
   };
 
-  const handleResume = () => {
-    if (status !== 'paused' || hasCompletedSearch) return;
-
-    addTimelineEvent('Resuming search', 'Reconnecting to live sources and continuing this session.', {
-      status: 'running',
-      severity: 'info',
-      details: 'A fresh search request will be started.',
-      detailLines: [`Query: ${searchQuery}`, `Country code: ${countryCode || 'Global'}`],
-    });
-
+  const handleResume = async () => {
+    if (status !== 'paused' || isCompletedRef.current) return;
     setStatus('running');
+    addTimelineEvent('Search resumed', 'Queued updates are now being applied.', 'info', 'running');
+    flushQueuedEvents();
+    if (runId && !streamRef.current) {
+      const snapshot = await getJobSearchRunSnapshot(runId);
+      if (snapshot?.results?.length) setResults(snapshot.results);
+      connectToRunStream(runId);
+    }
   };
 
-  const handleStop = () => {
-    runIdRef.current += 1;
-    clearScheduledTimeouts();
-    abortInFlightFetch('stop');
-
-    if (!hasCompletedSearch) {
-      addTimelineEvent('Search stopped', 'Search session ended manually.', {
-        status: 'completed',
-        severity: 'warning',
-        details: 'The live search loop was stopped by user action.',
-        detailLines: [`Elapsed: ${formatTime(elapsedTime)}`, `Results shown: ${results.length}`],
-      });
+  const handleStop = async () => {
+    if (isCompletedRef.current) return;
+    isCompletedRef.current = true;
+    if (runId) {
+      try {
+        await stopJobSearchRun(runId);
+      } catch {
+        // Stop can race with completion; ignore transport errors.
+      }
     }
-
+    clearStream();
     setStatus('completed');
     setSearchPhase('completed');
-    setHasCompletedSearch(true);
+    addTimelineEvent('Search stopped', 'Search session ended manually.', 'warning', 'completed');
   };
 
-  const isSearching =
-    status === 'running' &&
-    !hasCompletedSearch &&
-    (searchPhase === 'initializing' || searchPhase === 'fetching' || searchPhase === 'post-processing');
+  const isSearching = status === 'running' && !isCompletedRef.current;
 
   const visibleResults = React.useMemo(() => {
     if (activeTab === 'all') return results;
@@ -435,29 +473,33 @@ export function SessionPage() {
       ? 'bg-emerald-50 text-emerald-600'
       : status === 'paused'
       ? 'bg-amber-50 text-amber-600'
+      : status === 'error'
+      ? 'bg-red-50 text-red-600'
       : 'bg-neutral-100 text-neutral-600';
 
-  const sourceRows =
-    searchPhase === 'error'
-      ? [
-          { name: 'Valyu Search', status: 'Unavailable' },
-          { name: 'Web Sources', status: 'Queued' },
-          { name: 'News Index', status: 'Queued' },
-          { name: 'Proprietary', status: 'Queued' },
-        ]
-      : isSearching
-      ? [
-          { name: 'Valyu Search', status: 'Searching' },
-          { name: 'Web Sources', status: 'Searching' },
-          { name: 'News Index', status: 'Queued' },
-          { name: 'Proprietary', status: 'Queued' },
-        ]
-      : [
-          { name: 'Valyu Search', status: 'Completed' },
-          { name: 'Web Sources', status: 'Completed' },
-          { name: 'News Index', status: 'Queued' },
-          { name: 'Proprietary', status: 'Queued' },
-        ];
+  const sourceRows = React.useMemo(() => {
+    const bySource = new Map<string, { name: string; status: 'Searching' | 'Completed' | 'Failed' }>();
+    for (const result of results) {
+      const key = result.sourceName || result.sourceDomain || 'Web Source';
+      const current = bySource.get(key) || { name: key, status: 'Completed' as const };
+      if (result.queueStatus === 'failed') {
+        current.status = 'Failed';
+      } else if (result.queueStatus === 'queued' || result.queueStatus === 'extracting') {
+        current.status = 'Searching';
+      } else if (current.status !== 'Failed') {
+        current.status = 'Completed';
+      }
+      bySource.set(key, current);
+    }
+    if (!bySource.size) {
+      return [
+        { name: 'LinkedIn Jobs', status: isSearching ? 'Searching' : 'Completed' },
+        { name: 'Indeed', status: isSearching ? 'Searching' : 'Completed' },
+        { name: 'Glassdoor', status: isSearching ? 'Searching' : 'Completed' },
+      ];
+    }
+    return Array.from(bySource.values()).slice(0, 6);
+  }, [results, isSearching]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -492,7 +534,7 @@ export function SessionPage() {
 
             {status === 'paused' && (
               <button
-                onClick={handleResume}
+                onClick={() => void handleResume()}
                 className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-lg font-bold hover:bg-emerald-100 transition-all min-h-[44px]"
               >
                 <Play size={18} />
@@ -500,16 +542,16 @@ export function SessionPage() {
               </button>
             )}
 
-            {status === 'completed' && (
+            {(status === 'completed' || status === 'error') && (
               <div className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-neutral-100 text-neutral-500 rounded-lg font-bold min-h-[44px]">
                 <CheckCircle2 size={18} />
-                <span className="md:hidden lg:inline">Completed</span>
+                <span className="md:hidden lg:inline">{status === 'error' ? 'Error' : 'Completed'}</span>
               </div>
             )}
 
             <button
-              onClick={handleStop}
-              disabled={status === 'completed'}
+              onClick={() => void handleStop()}
+              disabled={status === 'completed' || status === 'error'}
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-neutral-100 text-neutral-600 rounded-lg font-bold hover:bg-neutral-200 transition-all min-h-[44px] disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Square size={18} />
@@ -530,7 +572,7 @@ export function SessionPage() {
               <div className="space-y-3">
                 {[
                   { label: 'Expand search', active: true },
-                  { label: 'Visa sponsorship only', active: true },
+                  { label: 'Visa sponsorship only', active: Boolean(formData.visaSponsorship) },
                   { label: 'Strict matching', active: false },
                 ].map((filter) => (
                   <label key={filter.label} className="flex items-center justify-between cursor-pointer group">
@@ -550,21 +592,19 @@ export function SessionPage() {
               </h3>
               <div className="space-y-3">
                 {sourceRows.map((source) => (
-                  <div key={source.name} className="flex items-center justify-between">
+                  <div key={source.name} className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-neutral-600">{source.name}</span>
                     <div className="flex items-center gap-1.5">
                       {source.status === 'Searching' && <Loader2 size={12} className="animate-spin text-neutral-900" />}
                       {source.status === 'Completed' && <CheckCircle2 size={12} className="text-emerald-600" />}
-                      {source.status === 'Unavailable' && <AlertCircle size={12} className="text-red-500" />}
+                      {source.status === 'Failed' && <AlertCircle size={12} className="text-red-500" />}
                       <span
                         className={`text-[10px] font-bold uppercase ${
                           source.status === 'Searching'
                             ? 'text-neutral-900'
                             : source.status === 'Completed'
                             ? 'text-emerald-600'
-                            : source.status === 'Unavailable'
-                            ? 'text-red-500'
-                            : 'text-neutral-400'
+                            : 'text-red-500'
                         }`}
                       >
                         {source.status}
@@ -598,7 +638,6 @@ export function SessionPage() {
                 </div>
               ) : (
                 timeline.map((item) => {
-                  const hasDetails = Boolean(item.details || (item.detailLines && item.detailLines.length > 0));
                   const borderClass =
                     item.severity === 'error'
                       ? 'border-red-200'
@@ -617,12 +656,7 @@ export function SessionPage() {
                       : 'border-neutral-900';
 
                   return (
-                    <motion.div
-                      key={item.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="relative pl-10"
-                    >
+                    <motion.div key={item.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="relative pl-10">
                       <div className={`absolute left-3.5 top-1.5 w-3 h-3 rounded-full bg-white border-2 z-10 ${dotClass}`} />
                       <div className={`bg-white border rounded-xl p-4 shadow-sm hover:border-neutral-400 transition-all ${borderClass}`}>
                         <div className="flex justify-between items-start mb-1">
@@ -630,30 +664,6 @@ export function SessionPage() {
                           <span className="text-[10px] font-mono text-neutral-400">{item.timestamp}</span>
                         </div>
                         <p className="text-xs text-neutral-500 leading-relaxed">{item.description}</p>
-
-                        {hasDetails && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => toggleTimelineDetails(item.id)}
-                              className="mt-3 flex items-center gap-1 text-[10px] font-bold text-neutral-900 hover:text-black transition-all"
-                            >
-                              {item.isExpanded ? 'Hide details' : 'View details'}
-                              <ChevronRight size={10} className={`transition-transform ${item.isExpanded ? 'rotate-90' : ''}`} />
-                            </button>
-
-                            {item.isExpanded && (
-                              <div className="mt-3 p-3 rounded-lg border border-neutral-200 bg-neutral-50 space-y-2">
-                                {item.details && <p className="text-[11px] text-neutral-700">{item.details}</p>}
-                                {item.detailLines?.map((line, lineIndex) => (
-                                  <p key={`${item.id}-${lineIndex}`} className="text-[11px] text-neutral-500">
-                                    {line}
-                                  </p>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        )}
                       </div>
                     </motion.div>
                   );
@@ -669,7 +679,7 @@ export function SessionPage() {
               <Loader2 size={18} className="animate-spin text-neutral-900 mt-0.5" />
               <div>
                 <p className="text-xs font-bold text-neutral-800 uppercase tracking-wide">Searching for more opportunities...</p>
-                <p className="text-xs text-neutral-600 mt-1">Live fetch is active. Results will appear below this card.</p>
+                <p className="text-xs text-neutral-600 mt-1">Live queue is active. New cards will appear below in order.</p>
               </div>
             </div>
           )}
@@ -688,23 +698,18 @@ export function SessionPage() {
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">{visibleResults.length} Found</span>
-            </div>
+            <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">{visibleResults.length} Found</span>
           </div>
 
           <div className="space-y-4">
             <AnimatePresence initial={false}>
-              {results.length === 0 && isSearching ? (
+              {visibleResults.length === 0 && isSearching ? (
                 <div className="space-y-4">
                   {[1, 2, 3].map((skeleton) => (
                     <div key={skeleton} className="bg-white border border-neutral-100 rounded-xl p-5 animate-pulse space-y-3">
                       <div className="h-4 bg-neutral-100 rounded w-3/4" />
                       <div className="h-3 bg-neutral-100 rounded w-1/2" />
-                      <div className="flex gap-2">
-                        <div className="h-5 bg-neutral-100 rounded w-16" />
-                        <div className="h-5 bg-neutral-100 rounded w-16" />
-                      </div>
+                      <div className="h-5 bg-neutral-100 rounded w-28" />
                     </div>
                   ))}
                 </div>
@@ -721,42 +726,40 @@ export function SessionPage() {
                     animate={{ opacity: 1, scale: 1 }}
                     className="bg-white border border-neutral-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all group"
                   >
-                    <div className="flex justify-between items-start mb-3">
+                    <div className="flex justify-between items-start mb-3 gap-3">
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <h4 className="font-bold text-neutral-900 group-hover:text-black transition-colors">{result.title}</h4>
-                          {result.isSuspicious && (
-                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-red-50 text-red-600 rounded text-[10px] font-bold border border-red-100">
-                              <AlertCircle size={10} />
-                              Suspicious
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${queueClass(result.queueStatus)}`}>
+                            {queueLabel(result.queueStatus)}
+                          </span>
+                          {result.sourceVerified && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700">
+                              Verified
                             </span>
                           )}
                         </div>
                         <p className="text-sm text-neutral-500">
                           {result.organization} • {result.location}
                         </p>
+                        <p className="text-xs text-neutral-500 mt-1">
+                          Source: {result.sourceName} • {result.sourceDomain}
+                        </p>
                       </div>
-                      <div
-                        className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
-                          result.fitScore === 'High' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
-                        }`}
-                      >
-                        {result.fitScore} Fit
-                      </div>
+                      <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${fitClass(result.fitScore)}`}>{result.fitScore} Fit</div>
                     </div>
+
+                    {result.snippet && <p className="text-xs text-neutral-600 mb-3 line-clamp-2">{result.snippet}</p>}
 
                     <div className="flex flex-wrap gap-2 mb-4">
                       {result.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="px-2 py-0.5 bg-neutral-50 text-neutral-500 rounded text-[10px] font-medium border border-neutral-100"
-                        >
+                        <span key={tag} className="px-2 py-0.5 bg-neutral-50 text-neutral-500 rounded text-[10px] font-medium border border-neutral-100">
                           {tag}
                         </span>
                       ))}
                     </div>
 
-                    <div className="flex items-center justify-between pt-4 border-t border-neutral-50">
+                    <div className="flex items-center justify-between pt-4 border-t border-neutral-50 gap-3">
                       <div className="flex items-center gap-1">
                         <button className="p-2 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-all" title="Save">
                           <Bookmark size={16} />
@@ -765,17 +768,11 @@ export function SessionPage() {
                           <CheckCircle2 size={16} />
                         </button>
                         <button
-                          onClick={() => {
-                            setResults((prev) =>
-                              prev.map((item) => (item.id === result.id ? { ...item, isSuspicious: !item.isSuspicious } : item)),
-                            );
-                          }}
-                          className={`p-2 rounded-lg transition-all ${
-                            result.isSuspicious ? 'text-red-600 bg-red-50' : 'text-neutral-400 hover:text-red-600 hover:bg-red-50'
-                          }`}
-                          title="Flag as Suspicious"
+                          onClick={() => setSelectedJob(result)}
+                          className="p-2 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-all"
+                          title="View details"
                         >
-                          <AlertCircle size={16} />
+                          <Eye size={16} />
                         </button>
                       </div>
                       <a
@@ -795,6 +792,8 @@ export function SessionPage() {
           </div>
         </div>
       </div>
+
+      <JobDetailsModal job={selectedJob} onClose={() => setSelectedJob(null)} />
     </div>
   );
 }

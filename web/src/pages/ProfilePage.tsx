@@ -15,7 +15,12 @@ export function ProfilePage() {
       fitScore: 'High',
       tags: ['Visa Sponsorship', 'Remote Friendly'],
       link: '#',
-      status: 'saved'
+      status: 'saved',
+      sourceName: 'LinkedIn Jobs',
+      sourceDomain: 'linkedin.com',
+      sourceType: 'job_board',
+      sourceVerified: true,
+      queueStatus: 'ready'
     },
     {
       id: 's2',
@@ -25,7 +30,12 @@ export function ProfilePage() {
       fitScore: 'High',
       tags: ['Fully Funded', 'Postgraduate'],
       link: '#',
-      status: 'saved'
+      status: 'saved',
+      sourceName: 'MyJobMag',
+      sourceDomain: 'myjobmag.com',
+      sourceType: 'job_board',
+      sourceVerified: true,
+      queueStatus: 'ready'
     }
   ];
 

@@ -6,6 +6,8 @@ export enum SearchType {
 
 export type TimelineSeverity = 'info' | 'success' | 'warning' | 'error';
 export type TimelineStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type JobSourceType = 'job_board' | 'ats' | 'company_careers';
+export type JobQueueStatus = 'queued' | 'extracting' | 'verified' | 'ready' | 'failed';
 
 export interface SearchSession {
   id: string;
@@ -43,4 +45,18 @@ export interface SearchResult {
   isSuspicious?: boolean;
   snippet?: string;
   relevance?: number;
+  sourceName: string;
+  sourceDomain: string;
+  sourceType: JobSourceType;
+  sourceVerified: boolean;
+  queueStatus: JobQueueStatus;
+  queuePosition?: number;
+  salary?: string;
+  employmentType?: string;
+  workMode?: string;
+  postedDate?: string;
+  matchReason?: string;
+  requirements?: string[];
+  responsibilities?: string[];
+  benefits?: string[];
 }
