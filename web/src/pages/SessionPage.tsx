@@ -86,7 +86,8 @@ export function SessionPage() {
     const rolePart = roles.length ? roles.join(' OR ') : 'backend engineer';
     const sponsorshipPart = formData.visaSponsorship ? 'with visa sponsorship' : '';
     const remotePart = formData.remote ? 'remote' : '';
-    return [rolePart, 'jobs in', locationLabel, sponsorshipPart, remotePart].filter(Boolean).join(' ');
+    const locationPart = locationLabel !== 'Any location' ? `jobs in ${locationLabel}` : '';
+    return [rolePart, locationPart, sponsorshipPart, remotePart].filter(Boolean).join(' ');
   }, [roles, formData.visaSponsorship, formData.remote, locationLabel]);
 
   const [status, setStatus] = React.useState<'running' | 'paused' | 'completed' | 'error'>('running');

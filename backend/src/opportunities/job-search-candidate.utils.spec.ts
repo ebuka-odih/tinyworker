@@ -1,8 +1,10 @@
 import { SearchRunResultItem } from './job-search-run.store'
 import {
   deduplicateReadyResults,
+  deriveCandidateJobDetails,
   extractedTitleLooksValid,
   filterAndDeduplicateDiscoveredCandidates,
+  normalizeDiscoveryQuery,
 } from './job-search-candidate.utils'
 
 describe('job-search candidate utils', () => {
@@ -109,5 +111,21 @@ describe('job-search candidate utils', () => {
   it('rejects extracted listing titles as final job details', () => {
     expect(extractedTitleLooksValid('Flexible AI Engineer Jobs - Apply Today')).toBe(false)
     expect(extractedTitleLooksValid('Senior AI Engineer')).toBe(true)
+  })
+
+  it('normalizes generic any-location discovery queries', () => {
+    expect(normalizeDiscoveryQuery('backend engineer jobs in Any location')).toBe('backend engineer')
+    expect(normalizeDiscoveryQuery('backend engineer jobs in Berlin')).toBe('backend engineer in Berlin')
+  })
+
+  it('derives role and organization from ATS-style candidate titles', () => {
+    expect(deriveCandidateJobDetails('Job Application for Staff Backend Engineer, AI Platform at Home Solutions')).toEqual({
+      title: 'Staff Backend Engineer, AI Platform',
+      organization: 'Home Solutions',
+    })
+    expect(deriveCandidateJobDetails('Mistral AI - Software Engineer, Backend (Paris)')).toEqual({
+      title: 'Software Engineer, Backend (Paris)',
+      organization: 'Mistral AI',
+    })
   })
 })

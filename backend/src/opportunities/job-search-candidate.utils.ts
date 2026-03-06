@@ -150,6 +150,18 @@ export function canonicalizeJobUrl(url: string): string | null {
   }
 }
 
+export function normalizeDiscoveryQuery(query: string): string {
+  const normalized = String(query || '')
+    .replace(/\bjobs?\s+in\s+any location\b/gi, ' ')
+    .replace(/\bany location\b/gi, ' ')
+    .replace(/\bjobs?\b/gi, ' ')
+    .replace(/\bwith visa sponsorship\b/gi, ' visa sponsorship ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return normalized || String(query || '').trim()
+}
+
 export function isLikelyJobPostingCandidate(candidate: Pick<ValyuDiscoveredCandidate, 'title' | 'url'>): boolean {
   if (!canonicalizeJobUrl(candidate.url)) return false
   if (titleLooksLikeListingPage(candidate.title)) return false
@@ -167,6 +179,29 @@ export function isLikelyJobPostingCandidate(candidate: Pick<ValyuDiscoveredCandi
   } catch {
     return false
   }
+}
+
+export function deriveCandidateJobDetails(rawTitle: string): { title: string; organization?: string } {
+  const title = String(rawTitle || '').trim()
+  if (!title) return { title: '' }
+
+  const greenhouseMatch = title.match(/^Job Application for\s+(.+?)\s+at\s+(.+)$/i)
+  if (greenhouseMatch) {
+    return {
+      title: greenhouseMatch[1]?.trim() || title,
+      organization: greenhouseMatch[2]?.trim() || undefined,
+    }
+  }
+
+  const companyFirstMatch = title.match(/^(.+?)\s+-\s+(.+)$/)
+  if (companyFirstMatch) {
+    return {
+      title: companyFirstMatch[2]?.trim() || title,
+      organization: companyFirstMatch[1]?.trim() || undefined,
+    }
+  }
+
+  return { title }
 }
 
 function discoveryScore(candidate: ValyuDiscoveredCandidate): number {

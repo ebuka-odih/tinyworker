@@ -4,6 +4,7 @@ import { runTinyfishWithFallback } from '../tinyfish/tinyfish.client'
 import {
   canonicalizeJobUrl,
   deduplicateReadyResults,
+  deriveCandidateJobDetails,
   extractedTitleLooksValid,
 } from './job-search-candidate.utils'
 import { PrismaService } from '../prisma/prisma.service'
@@ -255,10 +256,11 @@ export class JobSearchOrchestrator {
     const fitScore: SearchRunResultItem['fitScore'] =
       candidate.relevance >= 0.8 ? 'High' : candidate.relevance >= 0.6 ? 'Medium' : 'Low'
     const locationLabel = input.countryCode || 'Global'
+    const derived = deriveCandidateJobDetails(candidate.title)
     return {
-      id: this.hashKey(`${candidate.url}::${candidate.title}`),
-      title: candidate.title,
-      organization: candidate.sourceName,
+      id: this.hashKey(candidate.url),
+      title: derived.title || candidate.title,
+      organization: derived.organization || candidate.sourceName,
       location: locationLabel,
       fitScore,
       tags: [candidate.sourceName, candidate.sourceVerified ? 'Verified' : 'Web'],
@@ -420,7 +422,9 @@ export class JobSearchOrchestrator {
 
   private buildReadyItem(base: SearchRunResultItem, payload: TinyfishExtractedRecord): SearchRunResultItem {
     const detailFields = this.toResultFields(payload)
-    const title = this.safeText(detailFields.title)
+    const derived = deriveCandidateJobDetails(base.title)
+    const title = this.safeText(detailFields.title) || this.safeText(derived.title)
+    const organization = this.safeText(detailFields.organization) || this.safeText(derived.organization) || base.organization
     if (!extractedTitleLooksValid(title)) {
       throw new Error('TinyFish did not extract a valid job title.')
     }
@@ -428,17 +432,17 @@ export class JobSearchOrchestrator {
     return {
       ...base,
       title,
-      organization: this.safeText(detailFields.organization),
-      location: this.safeText(detailFields.location),
-      snippet: this.safeText(detailFields.snippet),
-      salary: this.safeText(detailFields.salary),
-      employmentType: this.safeText(detailFields.employmentType),
-      workMode: this.safeText(detailFields.workMode),
-      postedDate: this.safeText(detailFields.postedDate),
-      matchReason: this.safeText(detailFields.matchReason),
-      requirements: detailFields.requirements || [],
-      responsibilities: detailFields.responsibilities || [],
-      benefits: detailFields.benefits || [],
+      organization,
+      location: this.safeText(detailFields.location) || base.location,
+      snippet: this.safeText(detailFields.snippet) || base.snippet,
+      salary: this.safeText(detailFields.salary) || undefined,
+      employmentType: this.safeText(detailFields.employmentType) || undefined,
+      workMode: this.safeText(detailFields.workMode) || undefined,
+      postedDate: this.safeText(detailFields.postedDate) || undefined,
+      matchReason: this.safeText(detailFields.matchReason) || undefined,
+      requirements: detailFields.requirements?.length ? detailFields.requirements : undefined,
+      responsibilities: detailFields.responsibilities?.length ? detailFields.responsibilities : undefined,
+      benefits: detailFields.benefits?.length ? detailFields.benefits : undefined,
       queueStatus: 'ready',
     }
   }
