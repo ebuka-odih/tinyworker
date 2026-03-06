@@ -44,6 +44,8 @@ type SessionLocationState = {
 
 type SearchPhase = 'initializing' | 'streaming' | 'background-monitoring' | 'completed' | 'error';
 type SessionStartupMode = 'new' | 'resume' | 'missing';
+type ResultFitFilter = 'all' | SearchResult['fitScore'];
+type ResultStageFilter = 'all' | 'ready' | 'extracting' | 'queued' | 'failed';
 
 const COUNTRY_CODES: Record<string, string> = {
   Germany: 'DE',
@@ -54,6 +56,8 @@ const COUNTRY_CODES: Record<string, string> = {
 };
 
 const SNAPSHOT_POLL_INTERVAL_MS = 5_000;
+type SidebarTab = 'filters' | 'sources';
+type SourcePanelStatus = 'Completed' | 'Searching' | 'Failed' | 'Queued' | 'Included';
 const SOURCE_CATALOG = [
   {
     name: 'LinkedIn Jobs',
@@ -242,6 +246,20 @@ function planBadgeClass(tier: 'free' | 'pro' | 'team') {
   return 'border-neutral-200 bg-neutral-100 text-neutral-600';
 }
 
+function sourceStatusRank(status: SourcePanelStatus) {
+  if (status === 'Completed') return 0;
+  if (status === 'Searching') return 1;
+  if (status === 'Failed') return 2;
+  if (status === 'Queued') return 3;
+  return 4;
+}
+
+function matchesResultStageFilter(result: SearchResult, filter: ResultStageFilter) {
+  if (filter === 'all') return true;
+  if (filter === 'ready') return result.queueStatus === 'ready' || result.queueStatus === 'verified';
+  return result.queueStatus === filter;
+}
+
 export function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
@@ -286,6 +304,10 @@ export function SessionPage() {
   const [savedJobKeys, setSavedJobKeys] = React.useState<Set<string>>(new Set());
   const [savingJobIds, setSavingJobIds] = React.useState<Set<string>>(new Set());
   const [isMobileActivityCollapsed, setIsMobileActivityCollapsed] = React.useState(true);
+  const [sidebarTab, setSidebarTab] = React.useState<SidebarTab>('filters');
+  const [resultFitFilter, setResultFitFilter] = React.useState<ResultFitFilter>('all');
+  const [resultStageFilter, setResultStageFilter] = React.useState<ResultStageFilter>('all');
+  const [resultSourceFilter, setResultSourceFilter] = React.useState<string>('all');
 
   const streamRef = React.useRef<{ close: () => void } | null>(null);
   const snapshotPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1038,11 +1060,44 @@ export function SessionPage() {
 
   const isSearching = (status === 'running' || status === 'paused') && !isCompletedRef.current;
 
-  const visibleResults = React.useMemo(() => {
+  const tabResults = React.useMemo(() => {
     if (activeTab === 'all') return results;
     if (activeTab === 'shortlisted') return results.filter((result) => result.status === 'shortlisted');
     return results.filter((result) => result.status === 'saved');
   }, [results, activeTab]);
+
+  const availableResultSources = React.useMemo(
+    () => {
+      const sources = tabResults
+        .map((result) => String(result.sourceName || '').trim())
+        .filter((value): value is string => Boolean(value));
+      return Array.from(new Set<string>(sources)).sort((a, b) => a.localeCompare(b));
+    },
+    [tabResults],
+  );
+
+  React.useEffect(() => {
+    if (resultSourceFilter === 'all') return;
+    if (availableResultSources.includes(resultSourceFilter)) return;
+    setResultSourceFilter('all');
+  }, [availableResultSources, resultSourceFilter]);
+
+  const visibleResults = React.useMemo(
+    () =>
+      tabResults.filter((result) => {
+        if (resultFitFilter !== 'all' && result.fitScore !== resultFitFilter) {
+          return false;
+        }
+        if (!matchesResultStageFilter(result, resultStageFilter)) {
+          return false;
+        }
+        if (resultSourceFilter !== 'all' && result.sourceName !== resultSourceFilter) {
+          return false;
+        }
+        return true;
+      }),
+    [resultFitFilter, resultSourceFilter, resultStageFilter, tabResults],
+  );
 
   const hiddenTimelineCount = Math.max(0, timeline.length);
 
@@ -1081,10 +1136,15 @@ export function SessionPage() {
 
   const visibleSources = React.useMemo(() => {
     const liveStatusBySource = new Map(sourceRows.map((source) => [source.name.toLowerCase(), source.status]));
-    return SOURCE_CATALOG.map((source) => ({
+    return SOURCE_CATALOG.map((source, index) => ({
       ...source,
-      status: liveStatusBySource.get(source.name.toLowerCase()) || (isSearching ? 'Queued' : 'Included'),
-    }));
+      status: (liveStatusBySource.get(source.name.toLowerCase()) || (isSearching ? 'Queued' : 'Included')) as SourcePanelStatus,
+      catalogIndex: index,
+    })).sort((a, b) => {
+      const statusDelta = sourceStatusRank(a.status) - sourceStatusRank(b.status);
+      if (statusDelta !== 0) return statusDelta;
+      return a.catalogIndex - b.catalogIndex;
+    });
   }, [isSearching, sourceRows]);
 
   const updateSessionAdvancedSetting = React.useCallback(
@@ -1185,118 +1245,139 @@ export function SessionPage() {
         <div className="lg:col-span-3 space-y-6">
           <div className="bg-white rounded-2xl border border-neutral-200 p-5 shadow-sm space-y-6">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
                 <Filter size={14} />
-                Live Filters
-              </h3>
+                Search Panel
+              </div>
               <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${planBadgeClass(subscriptionTier)}`}>
                 {subscriptionTier === 'free' ? <Lock size={11} /> : <Crown size={11} />}
                 {planLabel(subscriptionTier)}
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
-                <div className="pr-3">
-                  <h4 className="font-bold text-neutral-900">Expand search</h4>
-                  <p className="text-sm text-neutral-500">Wider discovery before ranking.</p>
-                </div>
-                <button
-                  type="button"
-                  disabled={!hasAdvancedAccess}
-                  onClick={() =>
-                    updateSessionAdvancedSetting({
-                      expandSearch: !(sessionFormData.expandSearch ?? true),
-                    })
-                  }
-                  className={`relative h-6 w-12 rounded-full transition-all ${(sessionFormData.expandSearch ?? true) ? 'bg-neutral-900' : 'bg-neutral-200'} ${!hasAdvancedAccess ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${(sessionFormData.expandSearch ?? true) ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
-                <div className="pr-3">
-                  <h4 className="font-bold text-neutral-900">Visa sponsorship only</h4>
-                  <p className="text-sm text-neutral-500">Save this preference for the next search.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSessionFormData((prev) => ({
-                      ...prev,
-                      visaSponsorship: !prev.visaSponsorship,
-                    }))
-                  }
-                  className={`relative h-6 w-12 rounded-full transition-all ${sessionFormData.visaSponsorship ? 'bg-neutral-900' : 'bg-neutral-200'}`}
-                >
-                  <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${sessionFormData.visaSponsorship ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
-                <div className="pr-3">
-                  <h4 className="font-bold text-neutral-900">Strict matching</h4>
-                  <p className="text-sm text-neutral-500">Exact role titles instead of broader intent.</p>
-                </div>
-                <button
-                  type="button"
-                  disabled={!hasAdvancedAccess}
-                  onClick={() =>
-                    updateSessionAdvancedSetting({
-                      strictMatching: !Boolean(sessionFormData.strictMatching),
-                    })
-                  }
-                  className={`relative h-6 w-12 rounded-full transition-all ${sessionFormData.strictMatching ? 'bg-neutral-900' : 'bg-neutral-200'} ${!hasAdvancedAccess ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${sessionFormData.strictMatching ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-
-              <div className="rounded-xl border border-neutral-200 bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h4 className="font-bold text-neutral-900">Source coverage</h4>
-                    <p className="text-sm text-neutral-500">Tighter regional scan or full global coverage.</p>
-                  </div>
-                  {!hasAdvancedAccess && <Lock size={14} className="text-neutral-400" />}
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {[
-                    { value: 'regional', label: 'Regional' },
-                    { value: 'global', label: 'Global' },
-                  ].map((option) => {
-                    const active = (sessionFormData.sourceScope || 'global') === option.value;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        disabled={!hasAdvancedAccess}
-                        onClick={() => updateSessionAdvancedSetting({ sourceScope: option.value as JobSearchIntakeData['sourceScope'] })}
-                        className={`rounded-xl border px-3 py-2 text-sm font-semibold transition-all ${
-                          active
-                            ? 'border-neutral-900 bg-neutral-900 text-white'
-                            : hasAdvancedAccess
-                            ? 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-400'
-                            : 'border-neutral-200 bg-white text-neutral-400 cursor-not-allowed'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-1">
+              {[
+                { id: 'filters' as const, label: 'Live Filters' },
+                { id: 'sources' as const, label: 'Sources' },
+              ].map((tab) => {
+                const isActive = sidebarTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSidebarTab(tab.id)}
+                    className={`rounded-lg px-3 py-2 text-sm font-bold transition-all ${
+                      isActive ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-700'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
 
-            <div className="pt-6 border-t border-neutral-100">
-              <div className="flex items-center justify-between gap-3 mb-4">
-                <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Sources</h3>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
-                  {hasAdvancedAccess ? 'Managed by plan' : 'Read only'}
-                </span>
-              </div>
+            {sidebarTab === 'filters' ? (
               <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
+                  <div className="pr-3">
+                    <h4 className="font-bold text-neutral-900">Expand search</h4>
+                    <p className="text-sm text-neutral-500">Wider discovery before ranking.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!hasAdvancedAccess}
+                    onClick={() =>
+                      updateSessionAdvancedSetting({
+                        expandSearch: !(sessionFormData.expandSearch ?? true),
+                      })
+                    }
+                    className={`relative h-6 w-12 rounded-full transition-all ${(sessionFormData.expandSearch ?? true) ? 'bg-neutral-900' : 'bg-neutral-200'} ${!hasAdvancedAccess ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${(sessionFormData.expandSearch ?? true) ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
+                  <div className="pr-3">
+                    <h4 className="font-bold text-neutral-900">Visa sponsorship only</h4>
+                    <p className="text-sm text-neutral-500">Save this preference for the next search.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSessionFormData((prev) => ({
+                        ...prev,
+                        visaSponsorship: !prev.visaSponsorship,
+                      }))
+                    }
+                    className={`relative h-6 w-12 rounded-full transition-all ${sessionFormData.visaSponsorship ? 'bg-neutral-900' : 'bg-neutral-200'}`}
+                  >
+                    <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${sessionFormData.visaSponsorship ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
+                  <div className="pr-3">
+                    <h4 className="font-bold text-neutral-900">Strict matching</h4>
+                    <p className="text-sm text-neutral-500">Exact role titles instead of broader intent.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!hasAdvancedAccess}
+                    onClick={() =>
+                      updateSessionAdvancedSetting({
+                        strictMatching: !Boolean(sessionFormData.strictMatching),
+                      })
+                    }
+                    className={`relative h-6 w-12 rounded-full transition-all ${sessionFormData.strictMatching ? 'bg-neutral-900' : 'bg-neutral-200'} ${!hasAdvancedAccess ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${sessionFormData.strictMatching ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-neutral-200 bg-white p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="font-bold text-neutral-900">Source coverage</h4>
+                      <p className="text-sm text-neutral-500">Tighter regional scan or full global coverage.</p>
+                    </div>
+                    {!hasAdvancedAccess && <Lock size={14} className="text-neutral-400" />}
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'regional', label: 'Regional' },
+                      { value: 'global', label: 'Global' },
+                    ].map((option) => {
+                      const active = (sessionFormData.sourceScope || 'global') === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          disabled={!hasAdvancedAccess}
+                          onClick={() => updateSessionAdvancedSetting({ sourceScope: option.value as JobSearchIntakeData['sourceScope'] })}
+                          className={`rounded-xl border px-3 py-2 text-sm font-semibold transition-all ${
+                            active
+                              ? 'border-neutral-900 bg-neutral-900 text-white'
+                              : hasAdvancedAccess
+                              ? 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-400'
+                              : 'border-neutral-200 bg-white text-neutral-400 cursor-not-allowed'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Sources</h3>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                    {hasAdvancedAccess ? 'Managed by plan' : 'Read only'}
+                  </span>
+                </div>
                 {visibleSources.slice(0, 6).map((source) => (
                   <div key={source.name} className="flex items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5">
                     <div className="min-w-0">
@@ -1326,7 +1407,7 @@ export function SessionPage() {
                   </div>
                 ))}
               </div>
-            </div>
+            )}
 
             <div className="pt-6 border-t border-neutral-100 space-y-3">
               {!hasAdvancedAccess && (
@@ -1481,6 +1562,75 @@ export function SessionPage() {
             <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">{visibleResults.length} Found</span>
           </div>
 
+          <div className="rounded-xl border border-neutral-200 bg-white p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <Filter size={14} className="text-neutral-500" />
+                <span className="text-xs font-bold uppercase tracking-widest text-neutral-500">Result Filters</span>
+              </div>
+              {(resultFitFilter !== 'all' || resultStageFilter !== 'all' || resultSourceFilter !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResultFitFilter('all');
+                    setResultStageFilter('all');
+                    setResultSourceFilter('all');
+                  }}
+                  className="text-xs font-bold text-neutral-600 transition-colors hover:text-neutral-900"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <label className="block">
+                <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Fit</span>
+                <select
+                  value={resultFitFilter}
+                  onChange={(event) => setResultFitFilter(event.target.value as ResultFitFilter)}
+                  className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                >
+                  <option value="all">All fit levels</option>
+                  <option value="High">High fit</option>
+                  <option value="Medium">Medium fit</option>
+                  <option value="Low">Low fit</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Stage</span>
+                <select
+                  value={resultStageFilter}
+                  onChange={(event) => setResultStageFilter(event.target.value as ResultStageFilter)}
+                  className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                >
+                  <option value="all">All stages</option>
+                  <option value="ready">Ready / Verified</option>
+                  <option value="extracting">Extracting</option>
+                  <option value="queued">Queued</option>
+                  <option value="failed">Failed</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Source</span>
+                <select
+                  value={resultSourceFilter}
+                  onChange={(event) => setResultSourceFilter(event.target.value)}
+                  className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                >
+                  <option value="all">All sources</option>
+                  {availableResultSources.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
           <div className="space-y-4">
             <AnimatePresence initial={false}>
               {visibleResults.length === 0 && isSearching ? (
@@ -1495,8 +1645,16 @@ export function SessionPage() {
                 </div>
               ) : visibleResults.length === 0 ? (
                 <div className="bg-white border border-neutral-200 rounded-xl p-6 text-center">
-                  <p className="text-sm font-medium text-neutral-700">No opportunities in this tab yet.</p>
-                  <p className="text-xs text-neutral-500 mt-1">Try switching to “All” to view the current results.</p>
+                  <p className="text-sm font-medium text-neutral-700">
+                    {resultFitFilter !== 'all' || resultStageFilter !== 'all' || resultSourceFilter !== 'all'
+                      ? 'No opportunities match the current filters.'
+                      : 'No opportunities in this tab yet.'}
+                  </p>
+                  <p className="text-xs text-neutral-500 mt-1">
+                    {resultFitFilter !== 'all' || resultStageFilter !== 'all' || resultSourceFilter !== 'all'
+                      ? 'Adjust or clear the filters above to widen the result list.'
+                      : 'Try switching to “All” to view the current results.'}
+                  </p>
                 </div>
               ) : (
                 visibleResults.map((result) => {
