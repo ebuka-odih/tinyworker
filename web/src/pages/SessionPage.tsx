@@ -1,5 +1,5 @@
 import React from 'react';
-import { useLocation, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Play,
   Pause,
@@ -15,8 +15,9 @@ import {
   Eye,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { JobQueueStatus, SearchResult, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
+import { JobQueueStatus, SearchCacheState, SearchResult, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
 import {
+  ApiUnauthorizedError,
   SearchRunEvent,
   SearchRunSnapshot,
   connectJobSearchRunStream,
@@ -30,6 +31,7 @@ import {
   readPersistedSearchSession,
   writePersistedSearchSession,
 } from '../services/searchSessionStore';
+import { useAuth } from '../auth/AuthContext';
 import { JobDetailsModal } from '../components/JobDetailsModal';
 
 type SessionLocationState = {
@@ -115,9 +117,50 @@ function queueLabel(status: JobQueueStatus) {
   return 'Failed';
 }
 
+function formatCacheAge(ageMs: number | undefined) {
+  const totalMinutes = Math.max(0, Math.floor(Number(ageMs || 0) / 60_000));
+  if (totalMinutes < 1) return 'just now';
+  if (totalMinutes < 60) return `${totalMinutes}m ago`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!minutes) return `${hours}h ago`;
+  return `${hours}h ${minutes}m ago`;
+}
+
+function isReadyLike(status: JobQueueStatus) {
+  return status === 'ready' || status === 'verified';
+}
+
+function mergeSearchResult(existing: SearchResult | undefined, incoming: SearchResult): SearchResult {
+  if (!existing) return incoming;
+  if (isReadyLike(existing.queueStatus) && !isReadyLike(incoming.queueStatus)) {
+    return existing;
+  }
+
+  return {
+    ...existing,
+    ...incoming,
+    requirements: incoming.requirements?.length ? incoming.requirements : existing.requirements,
+    responsibilities: incoming.responsibilities?.length ? incoming.responsibilities : existing.responsibilities,
+    benefits: incoming.benefits?.length ? incoming.benefits : existing.benefits,
+  };
+}
+
+function sortSearchResults(items: SearchResult[]) {
+  return [...items].sort((a, b) => {
+    const ap = typeof a.queuePosition === 'number' ? a.queuePosition : Number.MAX_SAFE_INTEGER;
+    const bp = typeof b.queuePosition === 'number' ? b.queuePosition : Number.MAX_SAFE_INTEGER;
+    if (ap !== bp) return ap - bp;
+    return (b.relevance || 0) - (a.relevance || 0);
+  });
+}
+
 export function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
+  const { accessToken, authUser, signOut } = useAuth();
+  const authUserId = String(authUser?.userId || '').trim();
   const state = (location.state || {}) as SessionLocationState;
   const [sessionFormData, setSessionFormData] = React.useState<JobSearchIntakeData>(state.formData || {});
   const roles = sessionFormData.roles || [];
@@ -142,6 +185,7 @@ export function SessionPage() {
   const [results, setResults] = React.useState<SearchResult[]>([]);
   const [activeTab, setActiveTab] = React.useState<'all' | 'shortlisted' | 'saved'>('all');
   const [runId, setRunId] = React.useState<string | null>(null);
+  const [cacheState, setCacheState] = React.useState<SearchCacheState | null>(null);
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
   const [startedAtMs, setStartedAtMs] = React.useState<number | null>(null);
   const [isHydrated, setIsHydrated] = React.useState(false);
@@ -190,6 +234,13 @@ export function SessionPage() {
     clearSnapshotPolling();
   }, [clearLiveWindowTimeout, clearSnapshotPolling, closeStream]);
 
+  const redirectToAuth = React.useCallback(() => {
+    clearRunActivity();
+    signOut();
+    const nextPath = `${location.pathname}${location.search}${location.hash}`;
+    navigate(`/auth?next=${encodeURIComponent(nextPath)}`, { replace: true });
+  }, [clearRunActivity, location.hash, location.pathname, location.search, navigate, signOut]);
+
   const addTimelineEvent = React.useCallback((title: string, description: string, severity: TimelineSeverity = 'info', eventStatus: TimelineStatus = 'running') => {
     setTimeline((prev) => [buildTimelineItem(title, description, severity, eventStatus), ...prev]);
   }, []);
@@ -205,16 +256,11 @@ export function SessionPage() {
       const next = [...prev];
       const existingIndex = next.findIndex((item) => item.id === incoming.id);
       if (existingIndex >= 0) {
-        next[existingIndex] = { ...next[existingIndex], ...incoming };
+        next[existingIndex] = mergeSearchResult(next[existingIndex], incoming);
       } else {
         next.push(incoming);
       }
-      return next.sort((a, b) => {
-        const ap = typeof a.queuePosition === 'number' ? a.queuePosition : Number.MAX_SAFE_INTEGER;
-        const bp = typeof b.queuePosition === 'number' ? b.queuePosition : Number.MAX_SAFE_INTEGER;
-        if (ap !== bp) return ap - bp;
-        return (b.relevance || 0) - (a.relevance || 0);
-      });
+      return sortSearchResults(next);
     });
   }, []);
 
@@ -235,7 +281,12 @@ export function SessionPage() {
     (snapshot: SearchRunSnapshot | null) => {
       if (!snapshot) return;
       const snapshotResults = Array.isArray(snapshot.results) ? snapshot.results : [];
-      setResults(snapshotResults);
+      setResults((prev) =>
+        sortSearchResults(
+          snapshotResults.map((item) => mergeSearchResult(prev.find((existing) => existing.id === item.id), item)),
+        ),
+      );
+      setCacheState(snapshot.cache || null);
       lastSequenceRef.current = Math.max(lastSequenceRef.current, Number(snapshot.lastSequence || 0));
 
       const counts = {
@@ -298,6 +349,21 @@ export function SessionPage() {
         return;
       }
 
+      if (event.type === 'run_cache_hit') {
+        const cache = (event.payload?.cache || null) as SearchCacheState | null;
+        setCacheState(cache);
+        if (cache) {
+          const cacheModeLabel = cache.mode === 'intent' ? 'similar search' : 'same search';
+          addTimelineEvent(
+            'Showing saved results',
+            `Loaded cached results from a ${cacheModeLabel} run (${formatCacheAge(cache.ageMs)}). Refreshing in the background.`,
+            'info',
+            'running',
+          );
+        }
+        return;
+      }
+
       if (event.type === 'source_scan_started') {
         addTimelineEvent('Scanning verified job sources', 'Discovery phase started across trusted job websites.', 'info', 'running');
         return;
@@ -320,7 +386,9 @@ export function SessionPage() {
       if (event.type === 'candidate_ready' && event.payload?.result) {
         const item = event.payload.result as SearchResult;
         upsertResult(item);
-        addTimelineEvent('Job card ready', `${item.title} is ready from ${item.sourceName}.`, 'success', 'completed');
+        if (!event.payload?.cacheHit) {
+          addTimelineEvent('Job card ready', `${item.title} is ready from ${item.sourceName}.`, 'success', 'completed');
+        }
         return;
       }
 
@@ -339,16 +407,19 @@ export function SessionPage() {
       }
 
       if (event.type === 'run_completed') {
+        setCacheState((prev) => (prev ? { ...prev, refreshing: false } : null));
         finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
         return;
       }
 
       if (event.type === 'run_stopped') {
+        setCacheState((prev) => (prev ? { ...prev, refreshing: false } : null));
         finalizeRunState('completed', 'completed', 'Search stopped', 'Run was stopped manually.', 'warning');
         return;
       }
 
       if (event.type === 'run_error') {
+        setCacheState((prev) => (prev ? { ...prev, refreshing: false } : null));
         const details = String(event.payload?.message || 'Unknown search error');
         const isTimeout = String(event.payload?.code || '').toLowerCase() === 'timeout';
         finalizeRunState('error', 'error', isTimeout ? 'Run timeout' : 'Search error', details, isTimeout ? 'warning' : 'error');
@@ -369,6 +440,7 @@ export function SessionPage() {
       closeStream();
       streamRef.current = connectJobSearchRunStream({
         runId: searchRunId,
+        token: accessToken,
         since: lastSequenceRef.current,
         onEvent: (event) => {
           const seq = Number(event.sequence || 0);
@@ -380,13 +452,17 @@ export function SessionPage() {
           applyRunEvent(event);
         },
         onSnapshot: applySnapshot,
-        onError: () => {
+        onError: (error) => {
+          if (error instanceof ApiUnauthorizedError) {
+            redirectToAuth();
+            return;
+          }
           if (isCompletedRef.current) return;
           addTimelineEvent('Stream reconnecting', 'Live updates interrupted. Trying to reconnect.', 'warning', 'running');
         },
       });
     },
-    [addTimelineEvent, applyRunEvent, applySnapshot, closeStream],
+    [accessToken, addTimelineEvent, applyRunEvent, applySnapshot, closeStream, redirectToAuth],
   );
 
   const startSnapshotPolling = React.useCallback(
@@ -397,9 +473,13 @@ export function SessionPage() {
         if (snapshotRequestInFlightRef.current || isCompletedRef.current) return;
         snapshotRequestInFlightRef.current = true;
         try {
-          const snapshot = await getJobSearchRunSnapshot(searchRunId);
+          const snapshot = await getJobSearchRunSnapshot(searchRunId, accessToken);
           applySnapshot(snapshot);
-        } catch {
+        } catch (error) {
+          if (error instanceof ApiUnauthorizedError) {
+            redirectToAuth();
+            return;
+          }
           if (!isCompletedRef.current) {
             addTimelineEvent('Background sync delayed', 'Could not refresh background search state. Retrying shortly.', 'warning', 'running');
           }
@@ -413,7 +493,7 @@ export function SessionPage() {
         void poll();
       }, SNAPSHOT_POLL_INTERVAL_MS);
     },
-    [addTimelineEvent, applySnapshot, clearSnapshotPolling],
+    [accessToken, addTimelineEvent, applySnapshot, clearSnapshotPolling, redirectToAuth],
   );
 
   const enterBackgroundMonitoring = React.useCallback(
@@ -454,15 +534,20 @@ export function SessionPage() {
 
   const handleStartFailure = React.useCallback(
     (error: unknown) => {
+      if (error instanceof ApiUnauthorizedError) {
+        redirectToAuth();
+        return;
+      }
       const message = error instanceof Error ? error.message : 'Search run could not be started.';
       setResults([]);
+      setCacheState(null);
       setStatus('error');
       setSearchPhase('error');
       isCompletedRef.current = true;
       clearRunActivity();
       addTimelineEvent('Search unavailable', message, 'error', 'failed');
     },
-    [addTimelineEvent, clearRunActivity],
+    [addTimelineEvent, clearRunActivity, redirectToAuth],
   );
 
   React.useEffect(() => {
@@ -470,7 +555,7 @@ export function SessionPage() {
     eventQueueRef.current = [];
     clearRunActivity();
 
-    const persisted = id ? readPersistedSearchSession(id) : null;
+    const persisted = id && authUserId ? readPersistedSearchSession(authUserId, id) : null;
     const nextFormData = persisted?.formData || state.formData || {};
 
     setSessionFormData(nextFormData);
@@ -492,6 +577,7 @@ export function SessionPage() {
       setResults(persisted.results || []);
       setActiveTab(persisted.activeTab || 'all');
       setRunId(persisted.runId || null);
+      setCacheState(persisted.cache || null);
       setStartedAtMs(persisted.startedAt || null);
       isCompletedRef.current = persisted.status === 'completed' || persisted.status === 'error';
       setIsHydrated(true);
@@ -507,6 +593,7 @@ export function SessionPage() {
       setResults([]);
       setActiveTab('all');
       setRunId(null);
+      setCacheState(null);
       setStartedAtMs(null);
       isCompletedRef.current = false;
       setIsHydrated(true);
@@ -528,13 +615,14 @@ export function SessionPage() {
     setResults([]);
     setActiveTab('all');
     setRunId(null);
+    setCacheState(null);
     setStartedAtMs(null);
     isCompletedRef.current = true;
     setIsHydrated(true);
-  }, [clearRunActivity, id, state.formData]);
+  }, [authUserId, clearRunActivity, id, state.formData]);
 
   React.useEffect(() => {
-    if (!id || !isHydrated) return;
+    if (!id || !isHydrated || !authUserId) return;
 
     const payload: PersistedSearchSession = {
       version: 1,
@@ -547,13 +635,14 @@ export function SessionPage() {
       results,
       activeTab,
       runId,
+      cache: cacheState,
       startedAt: startedAtMs,
       lastSequence: lastSequenceRef.current,
       updatedAt: Date.now(),
     };
 
-    writePersistedSearchSession(payload);
-  }, [activeTab, elapsedTime, id, isHydrated, results, runId, searchPhase, sessionFormData, startedAtMs, status, timeline]);
+    writePersistedSearchSession(authUserId, payload);
+  }, [activeTab, authUserId, cacheState, elapsedTime, id, isHydrated, results, runId, searchPhase, sessionFormData, startedAtMs, status, timeline]);
 
   React.useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -582,6 +671,7 @@ export function SessionPage() {
     eventQueueRef.current = [];
     lastSnapshotStatusRef.current = null;
     lastSnapshotCountsRef.current = { ready: 0, failed: 0, queued: 0 };
+    setCacheState(null);
     const now = Date.now();
     setStartedAtMs(now);
     setElapsedTime(0);
@@ -590,6 +680,7 @@ export function SessionPage() {
 
     try {
       const started = await startJobSearchRun({
+        token: accessToken,
         query: searchQuery,
         countryCode,
         maxNumResults: 10,
@@ -604,6 +695,7 @@ export function SessionPage() {
       handleStartFailure(error);
     }
   }, [
+    accessToken,
     addTimelineEvent,
     connectToRunStream,
     countryCode,
@@ -626,7 +718,7 @@ export function SessionPage() {
     }
 
     try {
-      const snapshot = await getJobSearchRunSnapshot(runId);
+      const snapshot = await getJobSearchRunSnapshot(runId, accessToken);
       if (!snapshot) {
         isCompletedRef.current = true;
         setStatus((prev) => (prev === 'error' ? 'error' : 'completed'));
@@ -665,7 +757,11 @@ export function SessionPage() {
       connectToRunStream(runId);
       scheduleLiveWindowTimeout(runId, effectiveStartedAtMs);
       addTimelineEvent('Restored search session', 'Reconnected to the existing search after refresh.', 'info', 'running');
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiUnauthorizedError) {
+        redirectToAuth();
+        return;
+      }
       isCompletedRef.current = true;
       setStatus((prev) => (prev === 'error' ? 'error' : 'completed'));
       setSearchPhase((prev) => (prev === 'error' ? 'error' : 'completed'));
@@ -677,10 +773,12 @@ export function SessionPage() {
       );
     }
   }, [
+    accessToken,
     addTimelineEvent,
     applySnapshot,
     connectToRunStream,
     enterBackgroundMonitoring,
+    redirectToAuth,
     results.length,
     runId,
     scheduleLiveWindowTimeout,
@@ -726,9 +824,15 @@ export function SessionPage() {
     addTimelineEvent('Search resumed', 'Queued updates are now being applied.', 'info', 'running');
     flushQueuedEvents();
     if (runId && !streamRef.current && searchPhase !== 'background-monitoring') {
-      const snapshot = await getJobSearchRunSnapshot(runId);
-      applySnapshot(snapshot);
-      connectToRunStream(runId);
+      try {
+        const snapshot = await getJobSearchRunSnapshot(runId, accessToken);
+        applySnapshot(snapshot);
+        connectToRunStream(runId);
+      } catch (error) {
+        if (error instanceof ApiUnauthorizedError) {
+          redirectToAuth();
+        }
+      }
     }
   };
 
@@ -736,8 +840,12 @@ export function SessionPage() {
     if (isCompletedRef.current) return;
     if (runId) {
       try {
-        await stopJobSearchRun(runId);
-      } catch {
+        await stopJobSearchRun(runId, accessToken);
+      } catch (error) {
+        if (error instanceof ApiUnauthorizedError) {
+          redirectToAuth();
+          return;
+        }
         // Stop can race with completion; ignore transport errors.
       }
     }
@@ -975,6 +1083,21 @@ export function SessionPage() {
         </div>
 
         <div className="lg:col-span-4 space-y-4">
+          {cacheState && (
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3">
+              <Loader2 size={18} className={`mt-0.5 text-amber-700 ${cacheState.refreshing ? 'animate-spin' : ''}`} />
+              <div>
+                <p className="text-xs font-bold text-amber-900 uppercase tracking-wide">
+                  {cacheState.refreshing ? 'Showing saved results while refreshing' : 'Saved results restored'}
+                </p>
+                <p className="text-xs text-amber-800 mt-1">
+                  {cacheState.mode === 'intent' ? 'Matched a similar recent search' : 'Matched the same recent search'} from{' '}
+                  {formatCacheAge(cacheState.ageMs)}.
+                </p>
+              </div>
+            </div>
+          )}
+
           {isSearching && (
             <div className="p-4 rounded-xl bg-neutral-100 border border-neutral-200 flex items-start gap-3">
               <Loader2 size={18} className="animate-spin text-neutral-900 mt-0.5" />

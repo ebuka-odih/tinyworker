@@ -1,12 +1,23 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { History, User, Menu, X } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { LogOut, Menu, X } from 'lucide-react';
+
+import { useAuth } from '../auth/AuthContext';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { authUser, isAuthenticated, signOut } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const authNext = encodeURIComponent('/new-search');
   const isNewSearchRoute = location.pathname.startsWith('/new-search') || location.pathname.startsWith('/intake/');
   
+  const handleSignOut = () => {
+    signOut();
+    setIsMenuOpen(false);
+    navigate('/auth?next=%2Fnew-search', { replace: true });
+  };
+
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans">
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-bottom border-neutral-200">
@@ -20,23 +31,47 @@ export function Layout({ children }: { children: React.ReactNode }) {
           
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-6">
-            <Link 
-              to="/new-search"
-              className={`text-sm font-medium transition-colors hover:text-neutral-900 ${isNewSearchRoute ? 'text-neutral-900' : 'text-neutral-500'}`}
-            >
-              New Search
-            </Link>
-            <button className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors flex items-center gap-1">
-              <History size={16} />
-              History
-            </button>
-            <div className="h-4 w-px bg-neutral-200" />
-            <Link 
-              to="/profile"
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${location.pathname === '/profile' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'}`}
-            >
-              <User size={18} />
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <Link 
+                  to="/new-search"
+                  className={`text-sm font-medium transition-colors hover:text-neutral-900 ${isNewSearchRoute ? 'text-neutral-900' : 'text-neutral-500'}`}
+                >
+                  New Search
+                </Link>
+                <Link
+                  to="/profile"
+                  className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${location.pathname === '/profile' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-bold uppercase">
+                    {authUser?.email?.slice(0, 2).toUpperCase() || 'TW'}
+                  </span>
+                  <span className="max-w-[180px] truncate">{authUser?.email}</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  to={`/auth?next=${authNext}`}
+                  className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-900"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  to={`/auth?next=${authNext}`}
+                  className="inline-flex min-h-[40px] items-center justify-center rounded-xl bg-neutral-900 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-black"
+                >
+                  Create Account
+                </Link>
+              </>
+            )}
           </nav>
 
           {/* Mobile Menu Toggle */}
@@ -51,24 +86,49 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* Mobile Nav */}
         {isMenuOpen && (
           <div className="md:hidden bg-white border-t border-neutral-100 p-4 space-y-4 shadow-xl animate-in slide-in-from-top duration-200">
-            <Link 
-              to="/new-search"
-              onClick={() => setIsMenuOpen(false)}
-              className={`block text-lg font-bold p-2 rounded-xl ${isNewSearchRoute ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'}`}
-            >
-              New Search
-            </Link>
-            <button className="w-full text-left text-lg font-bold p-2 text-neutral-600 rounded-xl hover:bg-neutral-50 flex items-center gap-2">
-              <History size={20} />
-              History
-            </button>
-            <Link 
-              to="/profile"
-              onClick={() => setIsMenuOpen(false)}
-              className={`block text-lg font-bold p-2 rounded-xl ${location.pathname === '/profile' ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'}`}
-            >
-              Profile & Settings
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <Link 
+                  to="/new-search"
+                  onClick={() => setIsMenuOpen(false)}
+                  className={`block text-lg font-bold p-2 rounded-xl ${isNewSearchRoute ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'}`}
+                >
+                  New Search
+                </Link>
+                <Link 
+                  to="/profile"
+                  onClick={() => setIsMenuOpen(false)}
+                  className={`block text-lg font-bold p-2 rounded-xl ${location.pathname === '/profile' ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'}`}
+                >
+                  Profile & Settings
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="w-full text-left text-lg font-bold p-2 text-neutral-600 rounded-xl hover:bg-neutral-50 flex items-center gap-2"
+                >
+                  <LogOut size={20} />
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  to={`/auth?next=${authNext}`}
+                  onClick={() => setIsMenuOpen(false)}
+                  className="block text-lg font-bold p-2 rounded-xl text-neutral-600 hover:bg-neutral-50"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  to={`/auth?next=${authNext}`}
+                  onClick={() => setIsMenuOpen(false)}
+                  className="block rounded-xl bg-neutral-900 px-4 py-3 text-center text-lg font-bold text-white"
+                >
+                  Create Account
+                </Link>
+              </>
+            )}
           </div>
         )}
       </header>

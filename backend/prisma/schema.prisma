@@ -21,6 +21,7 @@ model User {
   applications  Application[]
   documents     Document[]
   intents       CandidateIntent[]
+  jobSearchRuns JobSearchRun[]
 
   @@index([createdAt])
 }
@@ -190,25 +191,30 @@ model TelegramReport {
 }
 
 model JobSearchRun {
-  id          String   @id @default(uuid())
-  query       String
-  queryHash   String
-  countryCode String?
-  sourceScope String   @default("global")
-  status      String   @default("running") // running|completed|failed|stopped
-  startedAt   DateTime @default(now())
-  completedAt DateTime?
-  stoppedAt   DateTime?
+  id           String   @id @default(uuid())
+  userId       String?
+  query        String
+  queryHash    String
+  intentHash   String?
+  countryCode  String?
+  sourceScope  String   @default("global")
+  status       String   @default("running") // running|completed|failed|stopped
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  stoppedAt    DateTime?
   lastSequence Int     @default(0)
   totalQueued  Int     @default(0)
   totalReady   Int     @default(0)
   totalFailed  Int     @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  events      JobSearchRunEvent[]
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  events       JobSearchRunEvent[]
 
+  @@index([userId, startedAt])
   @@index([queryHash, startedAt])
+  @@index([intentHash, startedAt])
   @@index([status, startedAt])
 }
 
@@ -244,12 +250,18 @@ model JobQueryCache {
   id          String   @id @default(uuid())
   queryHash   String   @unique
   query       String
+  intentHash  String?
+  normalizedIntent String?
   countryCode String?
   sourceScope String   @default("global")
+  remote      Boolean  @default(false)
+  visaSponsorship Boolean @default(false)
+  resultCount Int      @default(0)
   payload     Json
   expiresAt   DateTime
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([intentHash, expiresAt])
   @@index([expiresAt])
 }

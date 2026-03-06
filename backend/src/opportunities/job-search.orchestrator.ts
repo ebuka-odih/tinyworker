@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { createHash } from 'node:crypto'
+import { PrismaService } from '../prisma/prisma.service'
 import { runTinyfishWithFallback } from '../tinyfish/tinyfish.client'
 import {
   canonicalizeJobUrl,
@@ -7,12 +8,21 @@ import {
   deriveCandidateJobDetails,
   extractedTitleLooksValid,
 } from './job-search-candidate.utils'
-import { PrismaService } from '../prisma/prisma.service'
+import {
+  buildJobSearchCacheIdentity,
+  type JobSearchCacheIdentity,
+  sliceCachedReadyResults,
+} from './job-search-cache.utils'
 import { getActiveDiscoveryDomains, JobSourceScope } from './job-source-registry'
-import { JobSearchRunStore, SearchRunResultItem } from './job-search-run.store'
+import {
+  JobSearchRunStore,
+  SearchRunCacheState,
+  SearchRunResultItem,
+} from './job-search-run.store'
 import { ValyuDiscoveredCandidate, ValyuSearchService } from './valyu-search.service'
 
 type StartSearchRunInput = {
+  userId: string
   query: string
   countryCode?: string
   maxNumResults: number
@@ -37,8 +47,14 @@ type TinyfishExtractedRecord = {
   summary?: string
 }
 
+type QueryCacheHit = {
+  cache: SearchRunCacheState
+  results: SearchRunResultItem[]
+}
+
 const RUN_TIMEOUT_MS = Number(process.env.JOB_SEARCH_RUN_TIMEOUT_MS || 120_000)
-const QUERY_CACHE_TTL_MS = Number(process.env.JOB_QUERY_CACHE_TTL_MS || 10 * 60_000)
+const SUCCESS_QUERY_CACHE_TTL_MS = Number(process.env.JOB_QUERY_CACHE_TTL_MS || 6 * 60 * 60_000)
+const EMPTY_QUERY_CACHE_TTL_MS = Number(process.env.JOB_EMPTY_QUERY_CACHE_TTL_MS || 10 * 60_000)
 const EXTRACT_CACHE_TTL_MS = Number(process.env.JOB_EXTRACT_CACHE_TTL_MS || 24 * 60 * 60_000)
 const ENRICH_CONCURRENCY = Math.min(4, Math.max(1, Number(process.env.JOB_ENRICH_CONCURRENCY || 3)))
 
@@ -54,25 +70,22 @@ export class JobSearchOrchestrator {
 
   async startRun(input: StartSearchRunInput): Promise<{ runId: string }> {
     const normalized = this.normalizeInput(input)
-    const queryHash = this.hashKey(
-      JSON.stringify({
-        query: normalized.query,
-        countryCode: normalized.countryCode || '',
-        maxNumResults: normalized.maxNumResults,
-        sourceScope: normalized.sourceScope,
-        remote: normalized.remote ? '1' : '0',
-        visa: normalized.visaSponsorship ? '1' : '0',
-      }),
-    )
+    const cacheIdentity = buildJobSearchCacheIdentity(normalized)
+    const activeRun = this.runStore.findActiveRunByIntentHash(cacheIdentity.intentHash, normalized.userId)
+    if (activeRun) {
+      return activeRun
+    }
 
     const created = await this.runStore.createRun({
+      userId: normalized.userId,
       query: normalized.query,
-      queryHash,
+      queryHash: cacheIdentity.queryHash,
+      intentHash: cacheIdentity.intentHash,
       countryCode: normalized.countryCode,
       sourceScope: normalized.sourceScope,
     })
 
-    void this.executeRun(created.runId, normalized, queryHash).catch(async (error: any) => {
+    void this.executeRun(created.runId, normalized, cacheIdentity).catch(async (error: any) => {
       const details = error instanceof Error ? error.message : String(error)
       await this.runStore.appendEvent(created.runId, 'run_error', { message: details })
       await this.runStore.setStatus(created.runId, 'failed')
@@ -82,24 +95,38 @@ export class JobSearchOrchestrator {
     return created
   }
 
-  async stopRun(runId: string): Promise<boolean> {
-    const ok = this.runStore.requestStop(runId)
+  async stopRun(runId: string, userId: string): Promise<boolean> {
+    const ok = this.runStore.requestStop(runId, userId)
     if (!ok) return false
     await this.runStore.appendEvent(runId, 'run_stopped', { reason: 'User requested stop' })
     await this.runStore.setStatus(runId, 'stopped')
     return true
   }
 
-  async getSnapshot(runId: string): Promise<Record<string, any> | null> {
-    return await this.runStore.getSnapshot(runId)
+  async getSnapshot(runId: string, userId: string): Promise<Record<string, any> | null> {
+    return await this.runStore.getSnapshot(runId, userId)
   }
 
-  async getEventsSince(runId: string, sequence = 0) {
-    return await this.runStore.getEventsSince(runId, sequence)
+  async getEventsSince(runId: string, userId: string, sequence = 0) {
+    return await this.runStore.getEventsSince(runId, userId, sequence)
+  }
+
+  async getCachedSearchResults(
+    input: StartSearchRunInput,
+  ): Promise<{ results: SearchRunResultItem[]; cache: SearchRunCacheState } | null> {
+    const normalized = this.normalizeInput(input)
+    const identity = buildJobSearchCacheIdentity(normalized)
+    const cacheHit = await this.readQueryCache(identity, normalized.maxNumResults)
+    if (!cacheHit) return null
+    return {
+      results: cacheHit.results,
+      cache: cacheHit.cache,
+    }
   }
 
   private normalizeInput(input: StartSearchRunInput): StartSearchRunInput {
     return {
+      userId: String(input.userId || '').trim(),
       query: String(input.query || '').trim(),
       countryCode: input.countryCode ? String(input.countryCode).trim().toUpperCase() : undefined,
       maxNumResults: Math.max(1, Math.min(10, Number(input.maxNumResults || 10))),
@@ -109,7 +136,11 @@ export class JobSearchOrchestrator {
     }
   }
 
-  private async executeRun(runId: string, input: StartSearchRunInput, queryHash: string): Promise<void> {
+  private async executeRun(
+    runId: string,
+    input: StartSearchRunInput,
+    cacheIdentity: JobSearchCacheIdentity,
+  ): Promise<void> {
     await this.runStore.appendEvent(runId, 'run_started', {
       query: input.query,
       countryCode: input.countryCode || null,
@@ -118,25 +149,33 @@ export class JobSearchOrchestrator {
       concurrency: ENRICH_CONCURRENCY,
     })
 
-    const cache = await this.readQueryCache(queryHash)
-    if (cache) {
-      for (const item of cache) {
-        await this.runStore.upsertResult(runId, item)
+    const cacheHit = await this.readQueryCache(cacheIdentity, input.maxNumResults)
+    const cachedResults = cacheHit?.results || []
+    if (cacheHit) {
+      const activeCache = { ...cacheHit.cache, refreshing: true }
+      await this.runStore.setCacheState(runId, activeCache)
+      await this.runStore.appendEvent(runId, 'run_cache_hit', {
+        cache: activeCache,
+        total: cachedResults.length,
+      })
+      for (const item of cachedResults) {
+        const stored = await this.runStore.upsertResult(runId, item)
+        if (!stored) continue
         await this.runStore.appendEvent(runId, 'candidate_ready', {
-          result: item,
+          result: stored,
           cacheHit: true,
         })
       }
       await this.runStore.appendEvent(runId, 'run_progress', {
+        ready: cachedResults.length,
+        failed: 0,
+        queued: 0,
         cacheHit: true,
-        message: `Returned ${cache.length} cached result(s).`,
+        message:
+          cachedResults.length > 0
+            ? `Showing ${cachedResults.length} cached result(s) while refreshing.`
+            : 'Showing cached empty results while refreshing.',
       })
-      await this.runStore.appendEvent(runId, 'run_completed', {
-        total: cache.length,
-        fromCache: true,
-      })
-      await this.runStore.setStatus(runId, 'completed')
-      return
     }
 
     const runStartedAt = Date.now()
@@ -155,20 +194,31 @@ export class JobSearchOrchestrator {
 
     const uniqueCandidates = discovered.slice(0, input.maxNumResults)
     if (!uniqueCandidates.length) {
-      await this.runStore.appendEvent(runId, 'run_completed', { total: 0, message: 'No opportunities found.' })
+      if (!cachedResults.length) {
+        await this.writeQueryCache(cacheIdentity, input, [], {
+          allowIntentReuse: false,
+          ttlMs: EMPTY_QUERY_CACHE_TTL_MS,
+        })
+      }
+      await this.runStore.appendEvent(runId, 'run_completed', {
+        total: cachedResults.length,
+        failed: 0,
+        fromCache: Boolean(cacheHit),
+      })
       await this.runStore.setStatus(runId, 'completed')
-      await this.writeQueryCache(queryHash, input, [])
       return
     }
 
     for (let index = 0; index < uniqueCandidates.length; index += 1) {
       const candidate = uniqueCandidates[index]
       const queuedItem = this.buildQueuedItem(candidate, input, index + 1)
-      await this.runStore.upsertResult(runId, queuedItem)
-      await this.runStore.appendEvent(runId, 'candidate_queued', { result: queuedItem })
+      const stored = await this.runStore.upsertResult(runId, queuedItem)
+      if (stored?.queueStatus === 'queued') {
+        await this.runStore.appendEvent(runId, 'candidate_queued', { result: stored })
+      }
     }
 
-    const readyItems: SearchRunResultItem[] = []
+    const readyItems: SearchRunResultItem[] = [...cachedResults]
     let failedCount = 0
     let didTimeOut = false
 
@@ -194,15 +244,18 @@ export class JobSearchOrchestrator {
           ...queuedItem,
           queueStatus: 'extracting',
         }
-        await this.runStore.upsertResult(runId, extractingItem)
-        await this.runStore.appendEvent(runId, 'candidate_extracting', { result: extractingItem })
+        const extractingStored = await this.runStore.upsertResult(runId, extractingItem)
+        if (extractingStored?.queueStatus === 'extracting') {
+          await this.runStore.appendEvent(runId, 'candidate_extracting', { result: extractingStored })
+        }
 
         try {
           const readyItem = await this.enrichCandidate(candidate, input)
           if (this.runStore.isStopRequested(runId) || didTimeOut) return
-          await this.runStore.upsertResult(runId, readyItem)
-          await this.runStore.appendEvent(runId, 'candidate_ready', { result: readyItem })
-          readyItems.push(readyItem)
+          const stored = await this.runStore.upsertResult(runId, readyItem)
+          if (!stored) continue
+          await this.runStore.appendEvent(runId, 'candidate_ready', { result: stored })
+          readyItems.push(stored)
           await this.runStore.appendEvent(runId, 'run_progress', {
             ready: readyItems.length,
             failed: failedCount,
@@ -217,10 +270,17 @@ export class JobSearchOrchestrator {
             queueStatus: 'failed',
             snippet: extractingItem.snippet || message,
           }
-          await this.runStore.upsertResult(runId, failedItem)
-          await this.runStore.appendEvent(runId, 'candidate_failed', {
-            result: failedItem,
-            message,
+          const stored = await this.runStore.upsertResult(runId, failedItem)
+          if (stored?.queueStatus === 'failed') {
+            await this.runStore.appendEvent(runId, 'candidate_failed', {
+              result: stored,
+              message,
+            })
+          }
+          await this.runStore.appendEvent(runId, 'run_progress', {
+            ready: readyItems.length,
+            failed: failedCount,
+            queued: Math.max(0, queue.length),
           })
         }
       }
@@ -243,16 +303,31 @@ export class JobSearchOrchestrator {
       .slice(0, input.maxNumResults)
       .map((item, index) => ({ ...item, queuePosition: index + 1 }))
 
-    await this.writeQueryCache(queryHash, input, finalResults)
+    if (finalResults.length > 0) {
+      await this.writeQueryCache(cacheIdentity, input, finalResults, {
+        allowIntentReuse: true,
+        ttlMs: SUCCESS_QUERY_CACHE_TTL_MS,
+      })
+    } else if (!cachedResults.length) {
+      await this.writeQueryCache(cacheIdentity, input, [], {
+        allowIntentReuse: false,
+        ttlMs: EMPTY_QUERY_CACHE_TTL_MS,
+      })
+    }
 
     await this.runStore.appendEvent(runId, 'run_completed', {
       total: finalResults.length,
       failed: failedCount,
+      fromCache: Boolean(cacheHit),
     })
     await this.runStore.setStatus(runId, 'completed')
   }
 
-  private buildQueuedItem(candidate: ValyuDiscoveredCandidate, input: StartSearchRunInput, queuePosition?: number): SearchRunResultItem {
+  private buildQueuedItem(
+    candidate: ValyuDiscoveredCandidate,
+    input: StartSearchRunInput,
+    queuePosition?: number,
+  ): SearchRunResultItem {
     const fitScore: SearchRunResultItem['fitScore'] =
       candidate.relevance >= 0.8 ? 'High' : candidate.relevance >= 0.6 ? 'Medium' : 'Low'
     const locationLabel = input.countryCode || 'Global'
@@ -460,33 +535,89 @@ export class JobSearchOrchestrator {
       .slice(0, 10)
   }
 
-  private async readQueryCache(queryHash: string): Promise<SearchRunResultItem[] | null> {
-    const cached = await this.prisma.jobQueryCache.findUnique({
-      where: { queryHash },
+  private async readQueryCache(
+    identity: JobSearchCacheIdentity,
+    maxNumResults: number,
+  ): Promise<QueryCacheHit | null> {
+    const now = new Date()
+    const exact = await this.prisma.jobQueryCache.findUnique({
+      where: { queryHash: identity.queryHash },
     })
-    if (!cached) return null
-    if (cached.expiresAt.getTime() <= Date.now()) return null
-    if (!Array.isArray(cached.payload)) return null
-    return cached.payload as unknown as SearchRunResultItem[]
+    const exactHit = this.toQueryCacheHit(exact, 'exact', maxNumResults, now)
+    if (exactHit) return exactHit
+
+    const intent = await this.prisma.jobQueryCache.findFirst({
+      where: {
+        intentHash: identity.intentHash,
+        resultCount: { gt: 0 },
+        expiresAt: { gt: now },
+      },
+      orderBy: [
+        { updatedAt: 'desc' },
+        { createdAt: 'desc' },
+      ],
+    })
+
+    return this.toQueryCacheHit(intent, 'intent', maxNumResults, now)
   }
 
-  private async writeQueryCache(queryHash: string, input: StartSearchRunInput, results: SearchRunResultItem[]): Promise<void> {
+  private toQueryCacheHit(
+    cached: {
+      payload: unknown
+      expiresAt: Date
+      updatedAt: Date
+    } | null,
+    mode: SearchRunCacheState['mode'],
+    maxNumResults: number,
+    now: Date,
+  ): QueryCacheHit | null {
+    if (!cached) return null
+    if (cached.expiresAt.getTime() <= now.getTime()) return null
+    if (!Array.isArray(cached.payload)) return null
+
+    return {
+      cache: {
+        mode,
+        cachedAt: cached.updatedAt.toISOString(),
+        ageMs: Math.max(0, now.getTime() - cached.updatedAt.getTime()),
+        refreshing: false,
+      },
+      results: sliceCachedReadyResults(cached.payload as SearchRunResultItem[], maxNumResults),
+    }
+  }
+
+  private async writeQueryCache(
+    identity: JobSearchCacheIdentity,
+    input: StartSearchRunInput,
+    results: SearchRunResultItem[],
+    options: { allowIntentReuse: boolean; ttlMs: number },
+  ): Promise<void> {
     await this.prisma.jobQueryCache.upsert({
-      where: { queryHash },
+      where: { queryHash: identity.queryHash },
       update: {
         query: input.query,
+        intentHash: options.allowIntentReuse ? identity.intentHash : null,
+        normalizedIntent: identity.normalizedIntent,
         countryCode: input.countryCode,
         sourceScope: input.sourceScope,
+        remote: Boolean(input.remote),
+        visaSponsorship: Boolean(input.visaSponsorship),
+        resultCount: results.length,
         payload: results as any,
-        expiresAt: new Date(Date.now() + QUERY_CACHE_TTL_MS),
+        expiresAt: new Date(Date.now() + options.ttlMs),
       },
       create: {
-        queryHash,
+        queryHash: identity.queryHash,
         query: input.query,
+        intentHash: options.allowIntentReuse ? identity.intentHash : null,
+        normalizedIntent: identity.normalizedIntent,
         countryCode: input.countryCode,
         sourceScope: input.sourceScope,
+        remote: Boolean(input.remote),
+        visaSponsorship: Boolean(input.visaSponsorship),
+        resultCount: results.length,
         payload: results as any,
-        expiresAt: new Date(Date.now() + QUERY_CACHE_TTL_MS),
+        expiresAt: new Date(Date.now() + options.ttlMs),
       },
     })
   }

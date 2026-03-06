@@ -1,16 +1,13 @@
 import { SearchResult } from '../types';
+import { API_BASE, ApiUnauthorizedError, buildAuthHeaders, readErrorMessage } from './apiBase';
 
 type JobSearchResponse = {
   ok?: boolean;
   results?: SearchResult[];
 };
 
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV ? 'http://localhost:4000/api' : '/api')
-).replace(/\/$/, '');
-
 export async function searchJobs(params: {
+  token: string;
   query: string;
   countryCode?: string;
   maxNumResults?: number;
@@ -22,11 +19,14 @@ export async function searchJobs(params: {
   if (params.maxNumResults) qs.set('maxNumResults', String(params.maxNumResults));
 
   const res = await fetch(`${API_BASE}/opportunities/search/jobs?${qs.toString()}`, {
+    headers: buildAuthHeaders(params.token),
     signal: params.signal,
   });
+  if (res.status === 401) {
+    throw new ApiUnauthorizedError();
+  }
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Job search failed (${res.status}): ${body}`);
+    throw new Error(await readErrorMessage(res, `Job search failed (${res.status})`));
   }
 
   const json = (await res.json()) as JobSearchResponse;

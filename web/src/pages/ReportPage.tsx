@@ -64,7 +64,7 @@ export function ReportPage() {
           
           <div className="flex items-center gap-3">
             <button 
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/new-search')}
               className="flex items-center gap-2 px-6 py-3 bg-neutral-900 text-white rounded-xl font-bold hover:bg-black shadow-xl shadow-neutral-200 active:scale-95 transition-all min-h-[48px]"
             >
               <RefreshCw size={20} />

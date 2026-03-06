@@ -1,7 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Briefcase, GraduationCap, FileText, ArrowRight, Clock, Sparkles } from 'lucide-react';
+import { Briefcase, GraduationCap, FileText, ArrowRight, Clock, LogIn, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
+
+import { useAuth } from '../auth/AuthContext';
 
 const searchTypes = [
   {
@@ -35,6 +37,16 @@ const searchTypes = [
 
 export function LandingPage() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+
+  const handleStart = () => {
+    if (isAuthenticated) {
+      navigate('/new-search');
+      return;
+    }
+
+    navigate('/auth?next=%2Fnew-search');
+  };
 
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -55,7 +67,7 @@ export function LandingPage() {
           Find verified opportunities faster.
         </h1>
         <p className="text-lg text-neutral-500 max-w-lg mx-auto">
-          Use a guided search flow to set your goals, filters, and profile context before running a search.
+          Use a guided search flow to set your goals, filters, and profile context before running a search. You now need an account before search can begin.
         </p>
       </motion.div>
 
@@ -91,19 +103,26 @@ export function LandingPage() {
       >
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-100">
           <Sparkles size={12} />
-          New Search now starts on a dedicated flow page
+          Search now starts after sign-in or registration
         </div>
         <button
-          onClick={() => navigate('/new-search')}
+          onClick={handleStart}
           className="w-full md:w-auto px-10 py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 min-h-[56px] bg-neutral-900 text-white hover:bg-black shadow-xl shadow-neutral-200 active:scale-95"
         >
-          Go to New Search
+          {isAuthenticated ? 'Go to New Search' : 'Create Account to Start Search'}
           <ArrowRight size={20} />
         </button>
-        
-        <button className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors py-2">
-          Continue Previous Session
-        </button>
+
+        {!isAuthenticated && (
+          <button
+            type="button"
+            onClick={() => navigate('/auth?next=%2Fnew-search')}
+            className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors py-2 inline-flex items-center gap-2"
+          >
+            <LogIn size={16} />
+            Sign in to continue
+          </button>
+        )}
       </motion.div>
       
       <div className="mt-24 grid grid-cols-2 md:grid-cols-4 gap-12 opacity-30 grayscale">

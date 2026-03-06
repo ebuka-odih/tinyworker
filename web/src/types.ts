@@ -4,10 +4,23 @@ export enum SearchType {
   VISA = 'visa',
 }
 
+export interface AuthUser {
+  userId: string;
+  email: string;
+}
+
 export type TimelineSeverity = 'info' | 'success' | 'warning' | 'error';
 export type TimelineStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type JobSourceType = 'job_board' | 'ats' | 'company_careers';
 export type JobQueueStatus = 'queued' | 'extracting' | 'verified' | 'ready' | 'failed';
+export type SearchCacheMode = 'exact' | 'intent';
+
+export interface SearchCacheState {
+  mode: SearchCacheMode;
+  cachedAt: string;
+  ageMs: number;
+  refreshing: boolean;
+}
 
 export interface SearchSession {
   id: string;

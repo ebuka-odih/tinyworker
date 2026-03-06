@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common'
 import type { Response } from 'express'
 import { z } from 'zod'
 import { JwtAuthGuard } from '../auth/jwt.guard'
@@ -50,6 +50,7 @@ const StartSearchRunSchema = z.object({
 })
 
 @Controller('opportunities')
+@UseGuards(JwtAuthGuard)
 export class OpportunitiesController {
   constructor(
     private prisma: PrismaService,
@@ -59,12 +60,25 @@ export class OpportunitiesController {
   ) {}
 
   @Get('search/jobs')
-  async searchJobs(@Query() query: any) {
+  async searchJobs(@Req() req: any, @Query() query: any) {
     let parsed: z.infer<typeof SearchJobsQuerySchema>
     try {
       parsed = SearchJobsQuerySchema.parse(query || {})
     } catch (e: any) {
       throw new BadRequestException({ error: 'Invalid search query', details: e?.issues || e?.message })
+    }
+
+    const cacheHit = await this.jobSearchOrchestrator.getCachedSearchResults({
+      userId: req.user.userId as string,
+      query: parsed.query,
+      countryCode: parsed.countryCode?.toUpperCase(),
+      maxNumResults: parsed.maxNumResults ?? 10,
+      sourceScope: parsed.sourceScope || 'global',
+      remote: parsed.remote,
+      visaSponsorship: parsed.visaSponsorship,
+    })
+    if (cacheHit) {
+      return { ok: true, results: cacheHit.results, cache: cacheHit.cache }
     }
 
     const results = await this.valyuSearch.searchJobs({
@@ -78,7 +92,7 @@ export class OpportunitiesController {
   }
 
   @Post('search/jobs/runs')
-  async startSearchRun(@Body() body: any) {
+  async startSearchRun(@Req() req: any, @Body() body: any) {
     let parsed: z.infer<typeof StartSearchRunSchema>
     try {
       parsed = StartSearchRunSchema.parse(body || {})
@@ -87,6 +101,7 @@ export class OpportunitiesController {
     }
 
     const run = await this.jobSearchOrchestrator.startRun({
+      userId: req.user.userId as string,
       query: parsed.query,
       countryCode: parsed.countryCode?.toUpperCase(),
       maxNumResults: parsed.maxNumResults ?? 10,
@@ -99,24 +114,26 @@ export class OpportunitiesController {
   }
 
   @Get('search/jobs/runs/:runId')
-  async getSearchRunSnapshot(@Param('runId') runId: string) {
-    const snapshot = await this.jobSearchOrchestrator.getSnapshot(runId)
+  async getSearchRunSnapshot(@Req() req: any, @Param('runId') runId: string) {
+    const snapshot = await this.jobSearchOrchestrator.getSnapshot(runId, req.user.userId as string)
     if (!snapshot) {
-      throw new BadRequestException({ error: 'Search run not found' })
+      throw new NotFoundException({ error: 'Search run not found' })
     }
     return { ok: true, snapshot }
   }
 
   @Post('search/jobs/runs/:runId/stop')
-  async stopSearchRun(@Param('runId') runId: string) {
-    const stopped = await this.jobSearchOrchestrator.stopRun(runId)
-    const snapshot = await this.jobSearchOrchestrator.getSnapshot(runId)
+  async stopSearchRun(@Req() req: any, @Param('runId') runId: string) {
+    const userId = req.user.userId as string
+    const stopped = await this.jobSearchOrchestrator.stopRun(runId, userId)
+    const snapshot = await this.jobSearchOrchestrator.getSnapshot(runId, userId)
     return { ok: true, stopped, snapshot }
   }
 
   @Get('search/jobs/runs/:runId/stream')
   async streamSearchRun(@Param('runId') runId: string, @Query('since') sinceRaw: string | undefined, @Req() req: any, @Res() res: Response) {
     const since = Number.isFinite(Number(sinceRaw)) ? Math.max(0, Number(sinceRaw)) : 0
+    const userId = req.user.userId as string
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache, no-transform')
@@ -131,14 +148,14 @@ export class OpportunitiesController {
       res.write(`data: ${payload}\n\n`)
     }
 
-    const events = await this.jobSearchOrchestrator.getEventsSince(runId, since)
+    const events = await this.jobSearchOrchestrator.getEventsSince(runId, userId, since)
     for (const event of events) {
       writeEvent(event)
     }
 
-    const unsubscribe = this.runStore.subscribe(runId, writeEvent)
+    const unsubscribe = this.runStore.subscribe(runId, userId, writeEvent)
     if (!unsubscribe) {
-      const snapshot = await this.jobSearchOrchestrator.getSnapshot(runId)
+      const snapshot = await this.jobSearchOrchestrator.getSnapshot(runId, userId)
       if (snapshot) {
         res.write(`event: snapshot\n`)
         res.write(`data: ${JSON.stringify(snapshot)}\n\n`)
@@ -162,7 +179,6 @@ export class OpportunitiesController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard)
   async list(@Req() req: any, @Query('type') type?: string) {
     const userId = req.user.userId as string
     const opportunities = await this.prisma.opportunity.findMany({
@@ -176,7 +192,6 @@ export class OpportunitiesController {
   }
 
   @Post('import')
-  @UseGuards(JwtAuthGuard)
   async import(@Req() req: any, @Body() body: any) {
     const userId = req.user.userId as string
     let parsed: z.infer<typeof ImportSchema>

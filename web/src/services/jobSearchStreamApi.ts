@@ -1,11 +1,10 @@
-import { SearchResult } from '../types';
+import { SearchCacheState, SearchResult } from '../types';
+import { API_BASE, ApiUnauthorizedError, buildAuthHeaders, readErrorMessage } from './apiBase';
 
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV ? 'http://localhost:4000/api' : '/api')
-).replace(/\/$/, '');
+export { ApiUnauthorizedError } from './apiBase';
 
 export type StartSearchRunParams = {
+  token: string;
   query: string;
   countryCode?: string;
   maxNumResults?: number;
@@ -16,6 +15,7 @@ export type StartSearchRunParams = {
 
 export type SearchRunEventType =
   | 'run_started'
+  | 'run_cache_hit'
   | 'source_scan_started'
   | 'candidate_queued'
   | 'candidate_extracting'
@@ -33,6 +33,7 @@ export type SearchRunEvent = {
   type: SearchRunEventType;
   payload?: {
     result?: SearchResult;
+    cache?: SearchCacheState;
     message?: string;
     [key: string]: unknown;
   };
@@ -50,14 +51,15 @@ export type SearchRunSnapshot = {
   results?: SearchResult[];
   events?: SearchRunEvent[];
   lastSequence?: number;
+  cache?: SearchCacheState | null;
 };
 
 export async function startJobSearchRun(params: StartSearchRunParams): Promise<{ runId: string }> {
-  const res = await fetch(`${API_BASE}/opportunities/search/jobs/runs`, {
+  const response = await fetch(`${API_BASE}/opportunities/search/jobs/runs`, {
     method: 'POST',
-    headers: {
+    headers: buildAuthHeaders(params.token, {
       'Content-Type': 'application/json',
-    },
+    }),
     body: JSON.stringify({
       query: params.query,
       countryCode: params.countryCode,
@@ -67,90 +69,178 @@ export async function startJobSearchRun(params: StartSearchRunParams): Promise<{
       visaSponsorship: params.visaSponsorship ?? false,
     }),
   });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to start search run (${res.status}): ${body}`);
+
+  if (response.status === 401) {
+    throw new ApiUnauthorizedError();
   }
-  const json = (await res.json()) as { ok?: boolean; runId?: string };
-  if (!json.runId) throw new Error('Search run did not return a runId.');
-  return { runId: json.runId };
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `Failed to start search run (${response.status})`));
+  }
+
+  const payload = (await response.json()) as { runId?: string };
+  if (!payload.runId) {
+    throw new Error('Search run did not return a runId.');
+  }
+
+  return { runId: payload.runId };
 }
 
-export async function stopJobSearchRun(runId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(runId)}/stop`, {
+export async function stopJobSearchRun(runId: string, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(runId)}/stop`, {
     method: 'POST',
+    headers: buildAuthHeaders(token),
   });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to stop search run (${res.status}): ${body}`);
+
+  if (response.status === 401) {
+    throw new ApiUnauthorizedError();
+  }
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `Failed to stop search run (${response.status})`));
   }
 }
 
-export async function getJobSearchRunSnapshot(runId: string): Promise<SearchRunSnapshot | null> {
-  const res = await fetch(`${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(runId)}`);
-  if (res.status === 404 || res.status === 400) return null;
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to fetch search snapshot (${res.status}): ${body}`);
+export async function getJobSearchRunSnapshot(runId: string, token: string): Promise<SearchRunSnapshot | null> {
+  const response = await fetch(`${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(runId)}`, {
+    headers: buildAuthHeaders(token),
+  });
+
+  if (response.status === 401) {
+    throw new ApiUnauthorizedError();
   }
-  const json = (await res.json()) as { ok?: boolean; snapshot?: SearchRunSnapshot };
-  return json.snapshot || null;
+
+  if (response.status === 404 || response.status === 400) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `Failed to fetch search snapshot (${response.status})`));
+  }
+
+  const payload = (await response.json()) as { snapshot?: SearchRunSnapshot };
+  return payload.snapshot || null;
 }
 
-export function connectJobSearchRunStream(params: {
+type StreamParams = {
   runId: string;
+  token: string;
   since?: number;
   onEvent: (event: SearchRunEvent) => void;
   onSnapshot?: (snapshot: SearchRunSnapshot) => void;
-  onError?: (error: Event) => void;
-}): { close: () => void } {
-  const streamUrl = new URL(`${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(params.runId)}/stream`, window.location.origin);
-  if (typeof params.since === 'number' && Number.isFinite(params.since) && params.since > 0) {
-    streamUrl.searchParams.set('since', String(params.since));
-  }
+  onError?: (error: unknown) => void;
+};
 
-  const source = new EventSource(streamUrl.toString());
-  const eventNames: SearchRunEventType[] = [
-    'run_started',
-    'source_scan_started',
-    'candidate_queued',
-    'candidate_extracting',
-    'candidate_ready',
-    'candidate_failed',
-    'run_progress',
-    'run_completed',
-    'run_stopped',
-    'run_error',
-  ];
+export function connectJobSearchRunStream(params: StreamParams): { close: () => void } {
+  let closed = false;
+  let currentSince = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : 0;
+  let activeController: AbortController | null = null;
 
-  for (const eventName of eventNames) {
-    source.addEventListener(eventName, (evt) => {
-      const payload = (evt as MessageEvent<string>).data;
-      if (!payload) return;
+  const readStream = async () => {
+    while (!closed) {
+      const controller = new AbortController();
+      activeController = controller;
+
       try {
-        const parsed = JSON.parse(payload) as SearchRunEvent;
-        params.onEvent(parsed);
-      } catch {
-        // Ignore malformed payloads from the stream.
+        const streamUrl = new URL(
+          `${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(params.runId)}/stream`,
+          window.location.origin,
+        );
+        if (currentSince > 0) {
+          streamUrl.searchParams.set('since', String(currentSince));
+        }
+
+        const response = await fetch(streamUrl.toString(), {
+          headers: buildAuthHeaders(params.token, {
+            Accept: 'text/event-stream',
+          }),
+          signal: controller.signal,
+        });
+
+        if (response.status === 401) {
+          throw new ApiUnauthorizedError();
+        }
+
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response, `Search stream failed (${response.status})`));
+        }
+
+        if (!response.body) {
+          throw new Error('Search stream returned no body.');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (!closed) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true }).replace(/\r/g, '');
+
+          while (true) {
+            const separatorIndex = buffer.indexOf('\n\n');
+            if (separatorIndex === -1) break;
+
+            const rawEvent = buffer.slice(0, separatorIndex);
+            buffer = buffer.slice(separatorIndex + 2);
+
+            const lines = rawEvent.split('\n');
+            const dataLines: string[] = [];
+            let eventName = '';
+
+            for (const line of lines) {
+              if (line.startsWith(':')) continue;
+              if (line.startsWith('event:')) {
+                eventName = line.slice('event:'.length).trim();
+                continue;
+              }
+              if (line.startsWith('data:')) {
+                dataLines.push(line.slice('data:'.length).trim());
+              }
+            }
+
+            if (!dataLines.length) continue;
+            const payload = dataLines.join('\n').trim();
+            if (!payload) continue;
+
+            try {
+              if (eventName === 'snapshot') {
+                const snapshot = JSON.parse(payload) as SearchRunSnapshot;
+                currentSince = Math.max(currentSince, Number(snapshot.lastSequence || 0));
+                params.onSnapshot?.(snapshot);
+                continue;
+              }
+
+              const event = JSON.parse(payload) as SearchRunEvent;
+              currentSince = Math.max(currentSince, Number(event.sequence || 0));
+              params.onEvent(event);
+            } catch {
+              // Ignore malformed stream payloads.
+            }
+          }
+        }
+
+        if (closed) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      } catch (error) {
+        activeController = null;
+        if (closed || controller.signal.aborted) return;
+        params.onError?.(error);
+        if (error instanceof ApiUnauthorizedError) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
       }
-    });
-  }
-
-  source.addEventListener('snapshot', (evt) => {
-    const payload = (evt as MessageEvent<string>).data;
-    if (!payload || !params.onSnapshot) return;
-    try {
-      params.onSnapshot(JSON.parse(payload) as SearchRunSnapshot);
-    } catch {
-      // Ignore malformed snapshots.
     }
-  });
-
-  source.onerror = (error) => {
-    params.onError?.(error);
   };
 
+  void readStream();
+
   return {
-    close: () => source.close(),
+    close: () => {
+      closed = true;
+      activeController?.abort();
+      activeController = null;
+    },
   };
 }

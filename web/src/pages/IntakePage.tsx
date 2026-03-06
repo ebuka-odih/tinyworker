@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Check,
   ArrowLeft,
@@ -18,6 +18,12 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SearchType } from '../types';
+import { useAuth } from '../auth/AuthContext';
+import {
+  JobSearchIntakeData,
+  RecentSearchSummary,
+  listRecentSearchSummaries,
+} from '../services/searchSessionStore';
 
 type SearchOptionId = SearchType.JOB | SearchType.SCHOLARSHIP | SearchType.VISA;
 type StepId = 'searchType' | 'roles' | 'location' | 'experience' | 'documents' | 'preferences' | 'review';
@@ -33,6 +39,11 @@ type IntakeFormData = {
   salary: string;
   visaSponsorship: boolean;
   cv: File | null;
+};
+
+type IntakeLocationState = {
+  prefill?: JobSearchIntakeData;
+  reusedFromSessionId?: string;
 };
 
 const steps: Array<{ id: StepId; title: string; icon: React.ComponentType<{ size?: number }> }> = [
@@ -118,27 +129,72 @@ function getSearchTypeLabel(type: SearchOptionId): string {
   return 'Visa Requirements';
 }
 
-export function IntakePage() {
-  const { type } = useParams<{ type?: string }>();
-  const navigate = useNavigate();
-  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-
-  const initialType = normalizeType(type) || SearchType.JOB;
-
-  const [currentStep, setCurrentStep] = React.useState(0);
-  const [tagInput, setTagInput] = React.useState('');
-  const [formData, setFormData] = React.useState<IntakeFormData>({
-    searchType: initialType,
-    roles: [],
-    location: '',
-    remote: false,
+function buildIntakeFormData(
+  searchType: SearchOptionId,
+  prefill?: JobSearchIntakeData,
+): IntakeFormData {
+  return {
+    searchType,
+    roles: Array.isArray(prefill?.roles) ? [...prefill.roles] : [],
+    location: prefill?.location || '',
+    remote: Boolean(prefill?.remote),
     experience: 'Entry',
     years: '',
     industry: '',
     salary: '',
-    visaSponsorship: false,
+    visaSponsorship: Boolean(prefill?.visaSponsorship),
     cv: null,
-  });
+  };
+}
+
+function getPrefillStep(formData: IntakeFormData): number {
+  if (formData.searchType !== SearchType.JOB) return 0;
+  if (!formData.roles.length) return 1;
+  if (!formData.location) return 2;
+  return 3;
+}
+
+function formatRelativeTime(updatedAt: number): string {
+  if (!updatedAt) return 'unknown time';
+  const ageMs = Math.max(0, Date.now() - updatedAt);
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+export function IntakePage() {
+  const { type } = useParams<{ type?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { authUser } = useAuth();
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const routeState = (location.state || {}) as IntakeLocationState;
+  const authUserId = String(authUser?.userId || '').trim();
+
+  const initialType = normalizeType(type) || SearchType.JOB;
+  const initialFormData = React.useMemo(() => buildIntakeFormData(initialType, routeState.prefill), [initialType, routeState.prefill]);
+
+  const [currentStep, setCurrentStep] = React.useState(() => getPrefillStep(initialFormData));
+  const [tagInput, setTagInput] = React.useState('');
+  const [formData, setFormData] = React.useState<IntakeFormData>(initialFormData);
+  const [recentSearches, setRecentSearches] = React.useState<RecentSearchSummary[]>([]);
+  const [reusedFromSessionId, setReusedFromSessionId] = React.useState<string | null>(routeState.reusedFromSessionId || null);
+
+  React.useEffect(() => {
+    setRecentSearches(listRecentSearchSummaries(authUserId));
+  }, [authUserId]);
+
+  React.useEffect(() => {
+    const nextFormData = buildIntakeFormData(initialType, routeState.prefill);
+    setFormData(nextFormData);
+    setCurrentStep(getPrefillStep(nextFormData));
+    setTagInput('');
+    setReusedFromSessionId(routeState.reusedFromSessionId || null);
+  }, [initialType, routeState.prefill, routeState.reusedFromSessionId]);
 
   const yearsNumber = Number(formData.years);
   const isYearsValid = formData.years.trim() !== '' && Number.isFinite(yearsNumber) && yearsNumber >= 1;
@@ -214,6 +270,22 @@ export function IntakePage() {
       'roles',
       formData.roles.filter((item) => item !== role),
     );
+  };
+
+  const handleUseRecentSearch = (recent: RecentSearchSummary) => {
+    const nextFormData = buildIntakeFormData(SearchType.JOB, recent.formData);
+    setFormData(nextFormData);
+    setCurrentStep(getPrefillStep(nextFormData));
+    setTagInput('');
+    setReusedFromSessionId(recent.sessionId);
+  };
+
+  const handleResetPrefill = () => {
+    const blankForm = buildIntakeFormData(initialType);
+    setFormData(blankForm);
+    setCurrentStep(0);
+    setTagInput('');
+    setReusedFromSessionId(null);
   };
 
   const handleNext = () => {
@@ -620,92 +692,176 @@ export function IntakePage() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 md:gap-12 py-4 md:py-8">
-      <div className="lg:col-span-1">
-        <div className="sticky top-24 flex lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible pb-4 lg:pb-0 no-scrollbar">
-          {steps.map((step, index) => {
-            const StepIcon = step.icon;
-            const active = currentStep === index;
-            const completed = index < currentStep && isStepValid(index);
-            const accessible = isStepAccessible(index);
+    <div className="space-y-8 py-4 md:py-8">
+      {recentSearches.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-100 p-5 md:p-6">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-5">
+            <div>
+              <h2 className="text-lg font-bold text-neutral-900">Recent Searches</h2>
+              <p className="text-sm text-neutral-500">Reuse a previous search as your starting point. Nothing runs until you submit this form.</p>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">{recentSearches.length} saved</span>
+          </div>
 
-            return (
-              <button
-                key={step.id}
-                type="button"
-                onClick={() => {
-                  if (accessible) setCurrentStep(index);
-                }}
-                disabled={!accessible}
-                className={`flex items-center gap-3 p-3 rounded-xl transition-all whitespace-nowrap lg:whitespace-normal flex-shrink-0 lg:flex-shrink text-left ${
-                  active ? 'bg-white shadow-sm border border-neutral-100' : 'opacity-70'
-                } ${accessible ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'}`}
-              >
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all flex-shrink-0 ${
-                    active || completed ? 'bg-neutral-900 text-white' : 'bg-neutral-200 text-neutral-500'
-                  }`}
-                >
-                  {completed ? <Check size={16} /> : <StepIcon size={16} />}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {recentSearches.map((recent) => (
+              <div key={recent.sessionId} className="rounded-xl border border-neutral-200 p-4 bg-neutral-50/50">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-neutral-900">
+                      {recent.formData.roles?.join(', ') || 'Untitled search'}
+                    </h3>
+                    <p className="text-xs text-neutral-500 mt-1">
+                      {recent.formData.location || 'Any location'}
+                      {recent.formData.remote ? ' • Remote' : ''}
+                      {recent.formData.visaSponsorship ? ' • Sponsorship required' : ''}
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                    {recent.status}
+                  </span>
                 </div>
-                <div className="flex flex-col">
-                  <span className={`text-sm font-bold ${active ? 'text-neutral-900' : 'text-neutral-500'}`}>{step.title}</span>
-                  {active && <span className="text-[10px] uppercase tracking-widest text-neutral-900 font-bold hidden lg:block">Active</span>}
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold uppercase tracking-wide">
+                    {recent.counts.ready} ready
+                  </span>
+                  <span className="px-2 py-1 rounded bg-neutral-100 text-neutral-700 text-[10px] font-bold uppercase tracking-wide">
+                    {recent.counts.queued} queued
+                  </span>
+                  <span className="px-2 py-1 rounded bg-red-50 text-red-700 text-[10px] font-bold uppercase tracking-wide">
+                    {recent.counts.failed} failed
+                  </span>
                 </div>
-              </button>
-            );
-          })}
+
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <span className="text-xs text-neutral-500">Updated {formatRelativeTime(recent.updatedAt)}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/session/${recent.sessionId}`)}
+                      className="px-3 py-2 rounded-lg text-xs font-bold text-neutral-600 hover:text-neutral-900 hover:bg-white transition-all"
+                    >
+                      Open old results
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUseRecentSearch(recent)}
+                      className="px-3 py-2 rounded-lg text-xs font-bold bg-neutral-900 text-white hover:bg-black transition-all"
+                    >
+                      Use as base
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="lg:col-span-3">
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-100 p-6 md:p-12 min-h-[420px] md:min-h-[520px] flex flex-col">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={steps[currentStep]?.id}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.25 }}
-              className="flex-1"
-            >
-              {renderStepContent()}
-            </motion.div>
-          </AnimatePresence>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 md:gap-12">
+        <div className="lg:col-span-1">
+          <div className="sticky top-24 flex lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible pb-4 lg:pb-0 no-scrollbar">
+            {steps.map((step, index) => {
+              const StepIcon = step.icon;
+              const active = currentStep === index;
+              const completed = index < currentStep && isStepValid(index);
+              const accessible = isStepAccessible(index);
 
-          {currentStepError && (
-            <div className="mt-6 p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 flex items-start gap-2">
-              <AlertCircle size={16} className="mt-0.5" />
-              <p className="text-sm">{currentStepError}</p>
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  onClick={() => {
+                    if (accessible) setCurrentStep(index);
+                  }}
+                  disabled={!accessible}
+                  className={`flex items-center gap-3 p-3 rounded-xl transition-all whitespace-nowrap lg:whitespace-normal flex-shrink-0 lg:flex-shrink text-left ${
+                    active ? 'bg-white shadow-sm border border-neutral-100' : 'opacity-70'
+                  } ${accessible ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'}`}
+                >
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all flex-shrink-0 ${
+                      active || completed ? 'bg-neutral-900 text-white' : 'bg-neutral-200 text-neutral-500'
+                    }`}
+                  >
+                    {completed ? <Check size={16} /> : <StepIcon size={16} />}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className={`text-sm font-bold ${active ? 'text-neutral-900' : 'text-neutral-500'}`}>{step.title}</span>
+                    {active && <span className="text-[10px] uppercase tracking-widest text-neutral-900 font-bold hidden lg:block">Active</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="lg:col-span-3">
+          <div className="bg-white rounded-2xl shadow-sm border border-neutral-100 p-6 md:p-12 min-h-[420px] md:min-h-[520px] flex flex-col">
+            {reusedFromSessionId && (
+              <div className="mb-6 p-4 rounded-xl border border-sky-200 bg-sky-50 text-sky-900 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest">Based on previous search</p>
+                  <p className="text-sm mt-1">You are editing criteria copied from session {reusedFromSessionId}.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResetPrefill}
+                  className="px-3 py-2 rounded-lg text-xs font-bold bg-white text-sky-900 border border-sky-200 hover:border-sky-300 transition-all"
+                >
+                  Use blank form
+                </button>
+              </div>
+            )}
+
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={steps[currentStep]?.id}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.25 }}
+                className="flex-1"
+              >
+                {renderStepContent()}
+              </motion.div>
+            </AnimatePresence>
+
+            {currentStepError && (
+              <div className="mt-6 p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 flex items-start gap-2">
+                <AlertCircle size={16} className="mt-0.5" />
+                <p className="text-sm">{currentStepError}</p>
+              </div>
+            )}
+
+            {steps[currentStep]?.id === 'searchType' && formData.searchType === SearchType.JOB && (
+              <div className="mt-6 p-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 flex items-start gap-2">
+                <Sparkles size={16} className="mt-0.5" />
+                <p className="text-sm">Jobs flow selected. Continue to add your search criteria.</p>
+              </div>
+            )}
+
+            <div className="mt-8 md:mt-12 flex items-center justify-between pt-6 md:pt-8 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={handleBack}
+                className="flex items-center gap-2 px-4 md:px-6 py-3 text-neutral-500 font-bold hover:text-neutral-900 transition-all min-h-[44px]"
+              >
+                <ArrowLeft size={20} />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={!isCurrentStepValid}
+                className="flex items-center gap-2 px-8 md:px-10 py-3 bg-neutral-900 text-white rounded-xl font-bold hover:bg-black shadow-xl shadow-neutral-200 active:scale-95 transition-all min-h-[48px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neutral-900"
+              >
+                {currentStep === steps.length - 1 ? 'Run Search' : 'Next Step'}
+                <ArrowRight size={20} />
+              </button>
             </div>
-          )}
-
-          {steps[currentStep]?.id === 'searchType' && formData.searchType === SearchType.JOB && (
-            <div className="mt-6 p-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 flex items-start gap-2">
-              <Sparkles size={16} className="mt-0.5" />
-              <p className="text-sm">Jobs flow selected. Continue to add your search criteria.</p>
-            </div>
-          )}
-
-          <div className="mt-8 md:mt-12 flex items-center justify-between pt-6 md:pt-8 border-t border-neutral-100">
-            <button
-              type="button"
-              onClick={handleBack}
-              className="flex items-center gap-2 px-4 md:px-6 py-3 text-neutral-500 font-bold hover:text-neutral-900 transition-all min-h-[44px]"
-            >
-              <ArrowLeft size={20} />
-              <span className="hidden sm:inline">Back</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleNext}
-              disabled={!isCurrentStepValid}
-              className="flex items-center gap-2 px-8 md:px-10 py-3 bg-neutral-900 text-white rounded-xl font-bold hover:bg-black shadow-xl shadow-neutral-200 active:scale-95 transition-all min-h-[48px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neutral-900"
-            >
-              {currentStep === steps.length - 1 ? 'Run Search' : 'Next Step'}
-              <ArrowRight size={20} />
-            </button>
           </div>
         </div>
       </div>
