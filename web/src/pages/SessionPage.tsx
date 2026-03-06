@@ -1562,8 +1562,8 @@ export function SessionPage() {
             <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">{visibleResults.length} Found</span>
           </div>
 
-          <div className="rounded-xl border border-neutral-200 bg-white p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="rounded-xl border border-neutral-200 bg-white p-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <Filter size={14} className="text-neutral-500" />
                 <span className="text-xs font-bold uppercase tracking-widest text-neutral-500">Result Filters</span>
@@ -1583,13 +1583,13 @@ export function SessionPage() {
               )}
             </div>
 
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
               <label className="block">
-                <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Fit</span>
+                <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Fit</span>
                 <select
                   value={resultFitFilter}
                   onChange={(event) => setResultFitFilter(event.target.value as ResultFitFilter)}
-                  className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
                 >
                   <option value="all">All fit levels</option>
                   <option value="High">High fit</option>
@@ -1599,11 +1599,11 @@ export function SessionPage() {
               </label>
 
               <label className="block">
-                <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Stage</span>
+                <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Stage</span>
                 <select
                   value={resultStageFilter}
                   onChange={(event) => setResultStageFilter(event.target.value as ResultStageFilter)}
-                  className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
                 >
                   <option value="all">All stages</option>
                   <option value="ready">Ready / Verified</option>
@@ -1614,11 +1614,11 @@ export function SessionPage() {
               </label>
 
               <label className="block">
-                <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Source</span>
+                <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-neutral-400">Source</span>
                 <select
                   value={resultSourceFilter}
                   onChange={(event) => setResultSourceFilter(event.target.value)}
-                  className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-3 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm text-neutral-700 focus:outline-none focus:ring-2 focus:ring-neutral-900"
                 >
                   <option value="all">All sources</option>
                   {availableResultSources.map((source) => (
