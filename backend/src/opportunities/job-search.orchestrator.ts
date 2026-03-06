@@ -8,7 +8,7 @@ import {
   extractedTitleLooksValid,
 } from './job-search-candidate.utils'
 import { PrismaService } from '../prisma/prisma.service'
-import { getAllowedDomains, JobSourceScope } from './job-source-registry'
+import { getActiveDiscoveryDomains, JobSourceScope } from './job-source-registry'
 import { JobSearchRunStore, SearchRunResultItem } from './job-search-run.store'
 import { ValyuDiscoveredCandidate, ValyuSearchService } from './valyu-search.service'
 
@@ -102,7 +102,7 @@ export class JobSearchOrchestrator {
     return {
       query: String(input.query || '').trim(),
       countryCode: input.countryCode ? String(input.countryCode).trim().toUpperCase() : undefined,
-      maxNumResults: Math.max(1, Math.min(20, Number(input.maxNumResults || 12))),
+      maxNumResults: Math.max(1, Math.min(10, Number(input.maxNumResults || 10))),
       sourceScope: input.sourceScope || 'global',
       remote: Boolean(input.remote),
       visaSponsorship: Boolean(input.visaSponsorship),
@@ -140,7 +140,7 @@ export class JobSearchOrchestrator {
     }
 
     const runStartedAt = Date.now()
-    const allowedDomains = getAllowedDomains(input.sourceScope)
+    const allowedDomains = getActiveDiscoveryDomains(input.sourceScope)
     await this.runStore.appendEvent(runId, 'source_scan_started', {
       sourceScope: input.sourceScope,
       allowedDomains,

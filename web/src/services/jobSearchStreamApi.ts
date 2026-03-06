@@ -61,7 +61,7 @@ export async function startJobSearchRun(params: StartSearchRunParams): Promise<{
     body: JSON.stringify({
       query: params.query,
       countryCode: params.countryCode,
-      maxNumResults: params.maxNumResults ?? 12,
+      maxNumResults: params.maxNumResults ?? 10,
       sourceScope: params.sourceScope ?? 'global',
       remote: params.remote ?? false,
       visaSponsorship: params.visaSponsorship ?? false,

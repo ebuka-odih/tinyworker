@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { JwtAuthGuard } from '../auth/jwt.guard'
 import { PrismaService } from '../prisma/prisma.service'
 import { JobSearchOrchestrator } from './job-search.orchestrator'
-import { getAllowedDomains } from './job-source-registry'
+import { getActiveDiscoveryDomains } from './job-source-registry'
 import { JobSearchRunStore, SearchRunEvent } from './job-search-run.store'
 import { ValyuSearchService } from './valyu-search.service'
 
@@ -28,7 +28,7 @@ const ImportSchema = z.object({
 const SearchJobsQuerySchema = z.object({
   query: z.string().min(2),
   countryCode: z.string().trim().min(2).max(2).optional(),
-  maxNumResults: z.coerce.number().int().min(1).max(20).optional(),
+  maxNumResults: z.coerce.number().int().min(1).max(10).optional(),
   sourceScope: z.enum(['global', 'regional']).optional(),
   remote: z
     .union([z.boolean(), z.string().transform((value) => value === 'true')])
@@ -43,7 +43,7 @@ const SearchJobsQuerySchema = z.object({
 const StartSearchRunSchema = z.object({
   query: z.string().min(2),
   countryCode: z.string().trim().min(2).max(2).optional(),
-  maxNumResults: z.coerce.number().int().min(1).max(20).optional(),
+  maxNumResults: z.coerce.number().int().min(1).max(10).optional(),
   sourceScope: z.enum(['global', 'regional']).optional(),
   remote: z.boolean().optional(),
   visaSponsorship: z.boolean().optional(),
@@ -71,7 +71,7 @@ export class OpportunitiesController {
       query: parsed.query,
       countryCode: parsed.countryCode?.toUpperCase(),
       maxNumResults: parsed.maxNumResults ?? 10,
-      includedSources: getAllowedDomains(parsed.sourceScope || 'global'),
+      includedSources: getActiveDiscoveryDomains(parsed.sourceScope || 'global'),
     })
 
     return { ok: true, results }
@@ -89,7 +89,7 @@ export class OpportunitiesController {
     const run = await this.jobSearchOrchestrator.startRun({
       query: parsed.query,
       countryCode: parsed.countryCode?.toUpperCase(),
-      maxNumResults: parsed.maxNumResults ?? 12,
+      maxNumResults: parsed.maxNumResults ?? 10,
       sourceScope: parsed.sourceScope || 'global',
       remote: parsed.remote,
       visaSponsorship: parsed.visaSponsorship,

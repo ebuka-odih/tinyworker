@@ -24,20 +24,20 @@ import {
   startJobSearchRun,
   stopJobSearchRun,
 } from '../services/jobSearchStreamApi';
+import {
+  JobSearchIntakeData,
+  PersistedSearchSession,
+  readPersistedSearchSession,
+  writePersistedSearchSession,
+} from '../services/searchSessionStore';
 import { JobDetailsModal } from '../components/JobDetailsModal';
 
-type IntakeData = {
-  roles?: string[];
-  location?: string;
-  visaSponsorship?: boolean;
-  remote?: boolean;
-};
-
 type SessionLocationState = {
-  formData?: IntakeData;
+  formData?: JobSearchIntakeData;
 };
 
 type SearchPhase = 'initializing' | 'streaming' | 'background-monitoring' | 'completed' | 'error';
+type SessionStartupMode = 'new' | 'resume' | 'missing';
 
 const COUNTRY_CODES: Record<string, string> = {
   Germany: 'DE',
@@ -50,6 +50,48 @@ const COUNTRY_CODES: Record<string, string> = {
 const MAX_SEARCH_RUNTIME_MS = 90_000;
 
 const SNAPSHOT_POLL_INTERVAL_MS = 5_000;
+
+function hasSessionCriteria(formData: JobSearchIntakeData | null | undefined) {
+  if (!formData) return false;
+  return (
+    Boolean(formData.location) ||
+    Boolean(formData.remote) ||
+    Boolean(formData.visaSponsorship) ||
+    (Array.isArray(formData.roles) && formData.roles.length > 0)
+  );
+}
+
+function countResultsByQueueStatus(items: SearchResult[]) {
+  return items.reduce(
+    (acc, item) => {
+      if (item.queueStatus === 'failed') {
+        acc.failed += 1;
+      } else if (item.queueStatus === 'queued' || item.queueStatus === 'extracting') {
+        acc.queued += 1;
+      } else {
+        acc.ready += 1;
+      }
+      return acc;
+    },
+    { ready: 0, failed: 0, queued: 0 },
+  );
+}
+
+function buildTimelineItem(
+  title: string,
+  description: string,
+  severity: TimelineSeverity = 'info',
+  status: TimelineStatus = 'running',
+): TimelineItem {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    title,
+    description,
+    severity,
+    status,
+  };
+}
 
 function fitClass(fit: SearchResult['fitScore']) {
   if (fit === 'High') return 'bg-emerald-50 text-emerald-600';
@@ -77,18 +119,21 @@ export function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const state = (location.state || {}) as SessionLocationState;
-  const formData = state.formData || {};
-  const roles = formData.roles || [];
+  const [sessionFormData, setSessionFormData] = React.useState<JobSearchIntakeData>(state.formData || {});
+  const roles = sessionFormData.roles || [];
   const primaryRole = roles[0] || 'Backend Roles';
-  const locationLabel = formData.location || 'Any location';
-  const countryCode = formData.location && formData.location !== 'Any location' ? COUNTRY_CODES[formData.location] : undefined;
+  const locationLabel = sessionFormData.location || 'Any location';
+  const countryCode =
+    sessionFormData.location && sessionFormData.location !== 'Any location'
+      ? COUNTRY_CODES[sessionFormData.location]
+      : undefined;
   const searchQuery = React.useMemo(() => {
     const rolePart = roles.length ? roles.join(' OR ') : 'backend engineer';
-    const sponsorshipPart = formData.visaSponsorship ? 'with visa sponsorship' : '';
-    const remotePart = formData.remote ? 'remote' : '';
+    const sponsorshipPart = sessionFormData.visaSponsorship ? 'with visa sponsorship' : '';
+    const remotePart = sessionFormData.remote ? 'remote' : '';
     const locationPart = locationLabel !== 'Any location' ? `jobs in ${locationLabel}` : '';
     return [rolePart, locationPart, sponsorshipPart, remotePart].filter(Boolean).join(' ');
-  }, [roles, formData.visaSponsorship, formData.remote, locationLabel]);
+  }, [roles, sessionFormData.visaSponsorship, sessionFormData.remote, locationLabel]);
 
   const [status, setStatus] = React.useState<'running' | 'paused' | 'completed' | 'error'>('running');
   const [searchPhase, setSearchPhase] = React.useState<SearchPhase>('initializing');
@@ -98,6 +143,8 @@ export function SessionPage() {
   const [activeTab, setActiveTab] = React.useState<'all' | 'shortlisted' | 'saved'>('all');
   const [runId, setRunId] = React.useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
+  const [startedAtMs, setStartedAtMs] = React.useState<number | null>(null);
+  const [isHydrated, setIsHydrated] = React.useState(false);
 
   const streamRef = React.useRef<{ close: () => void } | null>(null);
   const snapshotPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -110,6 +157,7 @@ export function SessionPage() {
   const hasStartedRef = React.useRef(false);
   const lastSnapshotStatusRef = React.useRef<string | null>(null);
   const lastSnapshotCountsRef = React.useRef({ ready: 0, failed: 0, queued: 0 });
+  const startupModeRef = React.useRef<SessionStartupMode>('new');
 
   const selectedJob = React.useMemo(
     () => results.find((item) => item.id === selectedJobId) || null,
@@ -143,17 +191,7 @@ export function SessionPage() {
   }, [clearLiveWindowTimeout, clearSnapshotPolling, closeStream]);
 
   const addTimelineEvent = React.useCallback((title: string, description: string, severity: TimelineSeverity = 'info', eventStatus: TimelineStatus = 'running') => {
-    setTimeline((prev) => [
-      {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        title,
-        description,
-        severity,
-        status: eventStatus,
-      },
-      ...prev,
-    ]);
+    setTimeline((prev) => [buildTimelineItem(title, description, severity, eventStatus), ...prev]);
   }, []);
 
   React.useEffect(() => {
@@ -378,6 +416,42 @@ export function SessionPage() {
     [addTimelineEvent, applySnapshot, clearSnapshotPolling],
   );
 
+  const enterBackgroundMonitoring = React.useCallback(
+    (searchRunId: string, suppressTimeline = false) => {
+      closeStream();
+      setStatus('running');
+      setSearchPhase('background-monitoring');
+      if (!suppressTimeline) {
+        addTimelineEvent(
+          'Live view timed out',
+          `Live updates paused after ${Math.round(MAX_SEARCH_RUNTIME_MS / 1000)} seconds. Search continues in background and results will refresh automatically.`,
+          'warning',
+          'running',
+        );
+      }
+      startSnapshotPolling(searchRunId);
+    },
+    [addTimelineEvent, closeStream, startSnapshotPolling],
+  );
+
+  const scheduleLiveWindowTimeout = React.useCallback(
+    (searchRunId: string, runStartedAtMs: number) => {
+      clearLiveWindowTimeout();
+      const elapsedMs = Math.max(0, Date.now() - runStartedAtMs);
+      const remainingMs = MAX_SEARCH_RUNTIME_MS - elapsedMs;
+      if (remainingMs <= 0) {
+        enterBackgroundMonitoring(searchRunId);
+        return;
+      }
+
+      liveWindowTimeoutRef.current = setTimeout(() => {
+        if (isCompletedRef.current) return;
+        enterBackgroundMonitoring(searchRunId);
+      }, remainingMs);
+    },
+    [clearLiveWindowTimeout, enterBackgroundMonitoring],
+  );
+
   const handleStartFailure = React.useCallback(
     (error: unknown) => {
       const message = error instanceof Error ? error.message : 'Search run could not be started.';
@@ -392,77 +466,247 @@ export function SessionPage() {
   );
 
   React.useEffect(() => {
+    hasStartedRef.current = false;
+    eventQueueRef.current = [];
+    clearRunActivity();
+
+    const persisted = id ? readPersistedSearchSession(id) : null;
+    const nextFormData = persisted?.formData || state.formData || {};
+
+    setSessionFormData(nextFormData);
+    setSelectedJobId(null);
+    lastSnapshotStatusRef.current = null;
+    lastSnapshotCountsRef.current = countResultsByQueueStatus(persisted?.results || []);
+    lastSequenceRef.current = Number(persisted?.lastSequence || 0);
+
+    if (persisted) {
+      startupModeRef.current = 'resume';
+      setStatus(persisted.status);
+      setSearchPhase(persisted.searchPhase);
+      setElapsedTime(
+        persisted.startedAt && persisted.status === 'running'
+          ? Math.max(persisted.elapsedTime, Math.floor((Date.now() - persisted.startedAt) / 1000))
+          : persisted.elapsedTime,
+      );
+      setTimeline(persisted.timeline || []);
+      setResults(persisted.results || []);
+      setActiveTab(persisted.activeTab || 'all');
+      setRunId(persisted.runId || null);
+      setStartedAtMs(persisted.startedAt || null);
+      isCompletedRef.current = persisted.status === 'completed' || persisted.status === 'error';
+      setIsHydrated(true);
+      return;
+    }
+
+    if (hasSessionCriteria(nextFormData)) {
+      startupModeRef.current = 'new';
+      setStatus('running');
+      setSearchPhase('initializing');
+      setElapsedTime(0);
+      setTimeline([]);
+      setResults([]);
+      setActiveTab('all');
+      setRunId(null);
+      setStartedAtMs(null);
+      isCompletedRef.current = false;
+      setIsHydrated(true);
+      return;
+    }
+
+    startupModeRef.current = 'missing';
+    setStatus('error');
+    setSearchPhase('error');
+    setElapsedTime(0);
+    setTimeline([
+      buildTimelineItem(
+        'Search unavailable',
+        'This session has no saved search data. Start a new search to create a fresh session.',
+        'error',
+        'failed',
+      ),
+    ]);
+    setResults([]);
+    setActiveTab('all');
+    setRunId(null);
+    setStartedAtMs(null);
+    isCompletedRef.current = true;
+    setIsHydrated(true);
+  }, [clearRunActivity, id, state.formData]);
+
+  React.useEffect(() => {
+    if (!id || !isHydrated) return;
+
+    const payload: PersistedSearchSession = {
+      version: 1,
+      sessionId: id,
+      formData: sessionFormData,
+      status,
+      searchPhase,
+      elapsedTime,
+      timeline,
+      results,
+      activeTab,
+      runId,
+      startedAt: startedAtMs,
+      lastSequence: lastSequenceRef.current,
+      updatedAt: Date.now(),
+    };
+
+    writePersistedSearchSession(payload);
+  }, [activeTab, elapsedTime, id, isHydrated, results, runId, searchPhase, sessionFormData, startedAtMs, status, timeline]);
+
+  React.useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
     if (status === 'running' && !isCompletedRef.current) {
-      timer = setInterval(() => {
+      const updateElapsed = () => {
+        if (startedAtMs) {
+          setElapsedTime(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+          return;
+        }
         setElapsedTime((prev) => prev + 1);
+      };
+      updateElapsed();
+      timer = setInterval(() => {
+        updateElapsed();
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [status]);
+  }, [startedAtMs, status]);
 
   React.useEffect(() => {
     isPausedRef.current = status === 'paused';
   }, [status]);
 
-  React.useEffect(() => {
-    if (hasStartedRef.current) return;
-    hasStartedRef.current = true;
+  const startNewRun = React.useCallback(async () => {
     isCompletedRef.current = false;
     eventQueueRef.current = [];
     lastSnapshotStatusRef.current = null;
     lastSnapshotCountsRef.current = { ready: 0, failed: 0, queued: 0 };
+    const now = Date.now();
+    setStartedAtMs(now);
+    setElapsedTime(0);
+    setSearchPhase('initializing');
+    addTimelineEvent('Starting search run', `Running: "${searchQuery}"`, 'info', 'running');
 
-    const start = async () => {
-      setSearchPhase('initializing');
-      addTimelineEvent('Starting search run', `Running: "${searchQuery}"`, 'info', 'running');
-      try {
-        const started = await startJobSearchRun({
-          query: searchQuery,
-          countryCode,
-          maxNumResults: 12,
-          sourceScope: 'global',
-          remote: formData.remote,
-          visaSponsorship: formData.visaSponsorship,
-        });
-        setRunId(started.runId);
-        connectToRunStream(started.runId);
-
-        liveWindowTimeoutRef.current = setTimeout(() => {
-          if (isCompletedRef.current) return;
-          closeStream();
-          setStatus('running');
-          setSearchPhase('background-monitoring');
-          addTimelineEvent(
-            'Live view timed out',
-            `Live updates paused after ${Math.round(MAX_SEARCH_RUNTIME_MS / 1000)} seconds. Search continues in background and results will refresh automatically.`,
-            'warning',
-            'running',
-          );
-          startSnapshotPolling(started.runId);
-        }, MAX_SEARCH_RUNTIME_MS);
-      } catch (error) {
-        handleStartFailure(error);
-      }
-    };
-
-    void start();
-
-    return () => {
-      clearRunActivity();
-    };
+    try {
+      const started = await startJobSearchRun({
+        query: searchQuery,
+        countryCode,
+        maxNumResults: 10,
+        sourceScope: 'global',
+        remote: sessionFormData.remote,
+        visaSponsorship: sessionFormData.visaSponsorship,
+      });
+      setRunId(started.runId);
+      connectToRunStream(started.runId);
+      scheduleLiveWindowTimeout(started.runId, now);
+    } catch (error) {
+      handleStartFailure(error);
+    }
   }, [
     addTimelineEvent,
-    clearRunActivity,
-    closeStream,
     connectToRunStream,
     countryCode,
-    formData.remote,
-    formData.visaSponsorship,
     handleStartFailure,
+    scheduleLiveWindowTimeout,
     searchQuery,
-    startSnapshotPolling,
+    sessionFormData.remote,
+    sessionFormData.visaSponsorship,
   ]);
+
+  const resumePersistedSession = React.useCallback(async () => {
+    if (!runId) {
+      isCompletedRef.current = true;
+      setStatus((prev) => (prev === 'error' ? 'error' : 'completed'));
+      setSearchPhase((prev) => (prev === 'error' ? 'error' : 'completed'));
+      if (!results.length) {
+        addTimelineEvent('Showing saved session', 'Restored the saved search page without starting a new run.', 'info', 'completed');
+      }
+      return;
+    }
+
+    try {
+      const snapshot = await getJobSearchRunSnapshot(runId);
+      if (!snapshot) {
+        isCompletedRef.current = true;
+        setStatus((prev) => (prev === 'error' ? 'error' : 'completed'));
+        setSearchPhase((prev) => (prev === 'error' ? 'error' : 'completed'));
+        addTimelineEvent(
+          'Showing saved results',
+          'Could not reconnect to the original run. Displaying the last saved search state without restarting.',
+          'warning',
+          'completed',
+        );
+        return;
+      }
+
+      applySnapshot(snapshot);
+
+      if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'stopped') {
+        return;
+      }
+
+      const effectiveStartedAtMs = startedAtMs || Date.now();
+      if (!startedAtMs) {
+        setStartedAtMs(effectiveStartedAtMs);
+      }
+
+      if (status === 'paused') {
+        return;
+      }
+
+      if (searchPhase === 'background-monitoring' || Date.now() - effectiveStartedAtMs >= MAX_SEARCH_RUNTIME_MS) {
+        enterBackgroundMonitoring(runId, true);
+        return;
+      }
+
+      setStatus('running');
+      setSearchPhase('streaming');
+      connectToRunStream(runId);
+      scheduleLiveWindowTimeout(runId, effectiveStartedAtMs);
+      addTimelineEvent('Restored search session', 'Reconnected to the existing search after refresh.', 'info', 'running');
+    } catch {
+      isCompletedRef.current = true;
+      setStatus((prev) => (prev === 'error' ? 'error' : 'completed'));
+      setSearchPhase((prev) => (prev === 'error' ? 'error' : 'completed'));
+      addTimelineEvent(
+        'Showing saved results',
+        'Could not restore live updates after refresh. Keeping the last saved results instead of starting over.',
+        'warning',
+        'completed',
+      );
+    }
+  }, [
+    addTimelineEvent,
+    applySnapshot,
+    connectToRunStream,
+    enterBackgroundMonitoring,
+    results.length,
+    runId,
+    scheduleLiveWindowTimeout,
+    searchPhase,
+    startedAtMs,
+    status,
+  ]);
+
+  React.useEffect(() => {
+    if (!isHydrated || hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
+    if (startupModeRef.current === 'missing') {
+      return;
+    }
+
+    if (startupModeRef.current === 'resume') {
+      if (status === 'completed' || status === 'error') {
+        return;
+      }
+      void resumePersistedSession();
+      return;
+    }
+
+    void startNewRun();
+  }, [isHydrated, resumePersistedSession, startNewRun, status]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -541,6 +785,11 @@ export function SessionPage() {
     return Array.from(bySource.values()).slice(0, 6);
   }, [results, isSearching]);
 
+  const startedDateLabel = React.useMemo(() => {
+    if (!startedAtMs) return new Date().toLocaleDateString();
+    return new Date(startedAtMs).toLocaleDateString();
+  }, [startedAtMs]);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="bg-white rounded-2xl border border-neutral-200 p-4 md:p-6 shadow-sm overflow-hidden relative">
@@ -562,7 +811,7 @@ export function SessionPage() {
             </div>
             <p className="text-xs md:text-sm text-neutral-500 flex items-center gap-2">
               <Search size={14} />
-              ID: {id} • Started {new Date().toLocaleDateString()} • Elapsed {formatTime(elapsedTime)}
+              ID: {id} • Started {startedDateLabel} • Elapsed {formatTime(elapsedTime)}
             </p>
           </div>
 
@@ -624,7 +873,7 @@ export function SessionPage() {
               <div className="space-y-3">
                 {[
                   { label: 'Expand search', active: true },
-                  { label: 'Visa sponsorship only', active: Boolean(formData.visaSponsorship) },
+                  { label: 'Visa sponsorship only', active: Boolean(sessionFormData.visaSponsorship) },
                   { label: 'Strict matching', active: false },
                 ].map((filter) => (
                   <label key={filter.label} className="flex items-center justify-between cursor-pointer group">

@@ -126,6 +126,14 @@ export function getAllowedDomains(scope: JobSourceScope): string[] {
   return Array.from(new Set(domains.map((domain) => domain.toLowerCase().replace(/^www\./, ''))))
 }
 
+export function getActiveDiscoveryDomains(scope: JobSourceScope): string[] {
+  const domains = getSourceProfiles(scope)
+    .filter((source) => source.type === 'ats')
+    .flatMap((source) => source.domains)
+
+  return Array.from(new Set(domains.map((domain) => domain.toLowerCase().replace(/^www\./, ''))))
+}
+
 export function resolveSourceMeta(link?: string | null, sourceLabel?: string | null): ResolvedSourceMeta {
   const host = link ? toHost(link) : ''
   const normalizedLabel = String(sourceLabel || '').trim().toLowerCase()
