@@ -14,7 +14,7 @@ const searchTypeCards = [
     type: SearchType.JOB,
     title: 'Jobs',
     description:
-      'Search across major job boards and company career pages for roles that match your skills, experience, and target country.',
+      'Build a job search profile with your role focus, location, work mode, and visa preferences before running a live search.',
     meta: 'Guided setup • Estimated time: 2–5 min',
     badge: 'Live results',
     cta: 'Start job search',
@@ -24,7 +24,7 @@ const searchTypeCards = [
     type: SearchType.SCHOLARSHIP,
     title: 'Scholarships',
     description:
-      'Search scholarship sources, university funding pages, and academic opportunity listings based on your study goals and destination preferences.',
+      'Build a scholarship search profile around your study goals, destination preferences, and funding priorities so the setup is ready to refine and save.',
     meta: 'Guided setup • Estimated time: 3–6 min',
     badge: 'Structured flow',
     cta: 'Start scholarship search',
@@ -34,7 +34,7 @@ const searchTypeCards = [
     type: SearchType.VISA,
     title: 'Visa Requirements',
     description:
-      'Review visa pathways, required documents, and country-specific requirements through a guided relocation checklist.',
+      'Build a visa guidance profile with your target country, visa path, and relocation context so you can save and review the right checklist.',
     meta: 'Guided setup • Estimated time: 2–4 min',
     badge: 'Structured flow',
     cta: 'Check visa path',
