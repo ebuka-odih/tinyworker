@@ -117,6 +117,57 @@ function countResults(results: SearchResult[]) {
   );
 }
 
+function normalizeText(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeList(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((item) => normalizeText(item))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function searchFingerprint(type: SearchType, formData: SearchIntakeData): string {
+  if (type === SearchType.SCHOLARSHIP) {
+    return JSON.stringify({
+      type,
+      scholarshipQuery: normalizeText(formData.scholarshipQuery),
+      destinationRegion: normalizeText(formData.destinationRegion),
+      studyLevel: normalizeText(formData.studyLevel),
+      fundingType: normalizeText(formData.fundingType),
+      academicBackground: normalizeText(formData.academicBackground),
+      intakeTerm: normalizeText(formData.intakeTerm),
+    });
+  }
+
+  if (type === SearchType.VISA) {
+    return JSON.stringify({
+      type,
+      visaCountry: normalizeText(formData.visaCountry),
+      visaCategory: normalizeText(formData.visaCategory),
+      nationality: normalizeText(formData.nationality),
+      currentResidence: normalizeText(formData.currentResidence),
+      travelReason: normalizeText(formData.travelReason),
+      visaTimeline: normalizeText(formData.visaTimeline),
+    });
+  }
+
+  return JSON.stringify({
+    type,
+    roles: normalizeList(formData.roles),
+    location: normalizeText(formData.location),
+    remote: Boolean(formData.remote),
+    visaSponsorship: Boolean(formData.visaSponsorship),
+    experience: normalizeText(formData.experience),
+    years: normalizeText(formData.years),
+    industry: normalizeText(formData.industry),
+    salary: normalizeText(formData.salary),
+    sourceScope: normalizeText(formData.sourceScope),
+  });
+}
+
 function isValidPersistedSession(session: PersistedSearchSession | null | undefined): session is PersistedSearchSession {
   if (!session || session.version !== 1) return false;
   if (!String(session.sessionId || '').trim()) return false;
@@ -184,8 +235,7 @@ export function listRecentSearchSummaries(userId: string, limit = DEFAULT_RECENT
 
   try {
     const prefix = getStoragePrefix(safeUserId);
-    const seen = new Set<string>();
-    const summaries: RecentSearchSummary[] = [];
+    const summariesByFingerprint = new Map<string, RecentSearchSummary>();
 
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index);
@@ -197,15 +247,20 @@ export function listRecentSearchSummaries(userId: string, limit = DEFAULT_RECENT
       try {
         const parsed = JSON.parse(raw) as PersistedSearchSession;
         if (!isValidPersistedSession(parsed)) continue;
-        if (seen.has(parsed.sessionId)) continue;
-        seen.add(parsed.sessionId);
-        summaries.push(toRecentSearchSummary(parsed));
+        const type = resolveSearchType(parsed.type, parsed.formData);
+        const summary = toRecentSearchSummary(parsed);
+        const fingerprint = searchFingerprint(type, parsed.formData);
+        const existing = summariesByFingerprint.get(fingerprint);
+
+        if (!existing || summary.updatedAt > existing.updatedAt) {
+          summariesByFingerprint.set(fingerprint, summary);
+        }
       } catch {
         continue;
       }
     }
 
-    return summaries
+    return Array.from(summariesByFingerprint.values())
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, Math.max(1, limit));
   } catch {

@@ -1,5 +1,9 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common'
-import { filterAndDeduplicateDiscoveredCandidates, normalizeDiscoveryQuery } from './job-search-candidate.utils'
+import {
+  filterAndDeduplicateDiscoveredCandidates,
+  filterAndDeduplicateScholarshipCandidates,
+  normalizeDiscoveryQuery,
+} from './job-search-candidate.utils'
 import { resolveSourceMeta } from './job-source-registry'
 import { resolveScholarshipSourceMeta } from './scholarship-source-registry'
 
@@ -184,13 +188,17 @@ export class ValyuSearchService {
         })
       })
 
-      const filtered = this.filterAndDeduplicateScholarshipCandidates(aggregated)
+      const filtered = filterAndDeduplicateScholarshipCandidates(aggregated as ValyuDiscoveredCandidate[], {
+        maxAgeDays: 365,
+      }) as ValyuDiscoveredScholarshipCandidate[]
       if (filtered.length >= input.maxNumResults) {
         return filtered
       }
     }
 
-    return this.filterAndDeduplicateScholarshipCandidates(aggregated)
+    return filterAndDeduplicateScholarshipCandidates(aggregated as ValyuDiscoveredCandidate[], {
+      maxAgeDays: 365,
+    }) as ValyuDiscoveredScholarshipCandidate[]
   }
 
   private buildQueryVariants(input: JobSearchInput): string[] {
@@ -231,38 +239,39 @@ export class ValyuSearchService {
   }
 
   private buildScholarshipQueryVariants(input: ScholarshipSearchInput): string[] {
-    const original = String(input.query || '').trim()
-    const normalized = normalizeDiscoveryQuery(original)
+    const normalized = normalizeDiscoveryQuery(String(input.query || '').trim())
       .replace(/\bjobs?\b/gi, ' ')
       .replace(/\brole\b/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim()
     const variants = new Set<string>()
-    const base = normalized || original
+    const base = normalized
+    const siteScopedQuery = (domain: string, extra = '') => {
+      if (!base) return
+      variants.add(`site:${domain} ${base} scholarship ${extra}`.trim())
+    }
 
-    if (original) variants.add(original)
     if (base) {
-      variants.add(`${base} scholarship`)
       if (this.hasSource(input.includedSources, 'scholarshipportal.com')) {
-        variants.add(`site:scholarshipportal.com ${base}`)
+        siteScopedQuery('scholarshipportal.com')
       }
       if (this.hasSource(input.includedSources, 'mastersportal.com')) {
-        variants.add(`site:mastersportal.com/scholarships ${base}`)
+        siteScopedQuery('mastersportal.com/scholarships')
       }
       if (this.hasSource(input.includedSources, 'bachelorstudies.com')) {
-        variants.add(`site:bachelorstudies.com ${base}`)
+        siteScopedQuery('bachelorstudies.com')
       }
       if (this.hasSource(input.includedSources, 'daad.de')) {
-        variants.add(`site:daad.de ${base} scholarship`)
+        siteScopedQuery('daad.de', '"scholarship"')
       }
       if (this.hasSource(input.includedSources, 'chevening.org')) {
-        variants.add(`site:chevening.org ${base}`)
+        siteScopedQuery('chevening.org', '"scholarship"')
       }
       if (this.hasSource(input.includedSources, 'cscuk.fcdo.gov.uk')) {
-        variants.add(`site:cscuk.fcdo.gov.uk ${base}`)
+        siteScopedQuery('cscuk.fcdo.gov.uk', '"scholarship"')
       }
       if (this.hasSource(input.includedSources, 'opportunitiesforafricans.com')) {
-        variants.add(`site:opportunitiesforafricans.com ${base}`)
+        siteScopedQuery('opportunitiesforafricans.com')
       }
     }
 
@@ -279,35 +288,6 @@ export class ValyuSearchService {
     date.setUTCHours(0, 0, 0, 0)
     date.setUTCDate(date.getUTCDate() - Math.max(0, daysAgo))
     return date.toISOString().slice(0, 10)
-  }
-
-  private filterAndDeduplicateScholarshipCandidates(
-    items: ValyuDiscoveredScholarshipCandidate[],
-  ): ValyuDiscoveredScholarshipCandidate[] {
-    const deduped = new Map<string, ValyuDiscoveredScholarshipCandidate>()
-    for (const item of items) {
-      const canonicalUrl = this.canonicalizeUrl(item.url)
-      const key = canonicalUrl || `${String(item.title || '').trim().toLowerCase()}::${String(item.sourceDomain || '').trim().toLowerCase()}`
-      if (!key) continue
-      const existing = deduped.get(key)
-      if (!existing || item.relevance > existing.relevance) {
-        deduped.set(key, item)
-      }
-    }
-
-    return Array.from(deduped.values())
-      .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
-      .slice(0, 20)
-  }
-
-  private canonicalizeUrl(url: string): string | null {
-    try {
-      const parsed = new URL(url)
-      parsed.hash = ''
-      return parsed.toString()
-    } catch {
-      return null
-    }
   }
 
   private async executeValyuSearch(apiKey: string, body: Record<string, unknown>): Promise<ValyuSearchResult[]> {

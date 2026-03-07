@@ -361,12 +361,16 @@ export class ScholarshipSearchOrchestrator {
     const deadline = this.safeText(payload.deadline)
     const studyLevel = this.safeText(payload.study_level)
     const fundingType = this.safeText(payload.funding_type)
-    const snippet = this.safeText(payload.summary || payload.snippet) || base.snippet
+    const snippet = this.safeText(payload.summary || payload.snippet) || base.snippet || ''
     const matchReason = this.safeText(payload.match_reason)
     const requirements = this.safeList(payload.eligibility)
     const responsibilities = this.safeList(payload.application_steps)
     const benefits = this.safeList(payload.benefits)
     const tags = Array.from(new Set([...(base.tags || []), ...(studyLevel ? [studyLevel] : []), ...(fundingType ? [fundingType] : [])]))
+
+    if (!this.isValidScholarshipExtraction({ title, provider, destination, deadline, studyLevel, fundingType, snippet, requirements, responsibilities, benefits })) {
+      throw new Error('TinyFish did not extract enough scholarship detail from this page.')
+    }
 
     return {
       ...base,
@@ -385,6 +389,38 @@ export class ScholarshipSearchOrchestrator {
       benefits: benefits.length ? benefits : undefined,
       queueStatus: 'ready',
     }
+  }
+
+  private isValidScholarshipExtraction(input: {
+    title: string
+    provider: string
+    destination: string
+    deadline: string
+    studyLevel: string
+    fundingType: string
+    snippet: string
+    requirements: string[]
+    responsibilities: string[]
+    benefits: string[]
+  }): boolean {
+    const scholarshipLikeTitle = /\b(scholarship|fellowship|grant|bursary|funding)\b/i.test(input.title)
+    const structuredSignals = [
+      input.provider,
+      input.destination,
+      input.deadline,
+      input.studyLevel,
+      input.fundingType,
+      input.snippet,
+      input.requirements.length ? 'requirements' : '',
+      input.responsibilities.length ? 'responsibilities' : '',
+      input.benefits.length ? 'benefits' : '',
+    ].filter((value) => String(value || '').trim().length > 0).length
+
+    const looksAdvisory = /\b(applicant advice|application advice|application guide|how to apply|guidance|faq)\b/i.test(
+      `${input.title} ${input.snippet}`.trim(),
+    )
+
+    return scholarshipLikeTitle && !looksAdvisory && structuredSignals >= 3
   }
 
   private safeText(value: unknown): string {

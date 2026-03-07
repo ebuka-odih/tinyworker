@@ -406,7 +406,7 @@ export function IntakePage() {
 
   const persistNonJobSearch = React.useCallback(() => {
     if (!authUserId) return;
-    const sessionId = Math.random().toString(36).substring(7);
+    const sessionId = reusedFromSessionId || Math.random().toString(36).substring(7);
     const payload: PersistedSearchSession = {
       version: 1,
       sessionId,
@@ -426,7 +426,7 @@ export function IntakePage() {
     };
     writePersistedSearchSession(authUserId, payload);
     setSubmittedSession({ sessionId, type: formData.searchType });
-  }, [authUserId, formData]);
+  }, [authUserId, formData, reusedFromSessionId]);
 
   const handleNext = () => {
     if (!isCurrentStepValid) return;
@@ -437,11 +437,12 @@ export function IntakePage() {
     }
 
     if (formData.searchType === SearchType.JOB || formData.searchType === SearchType.SCHOLARSHIP) {
-      const sessionId = Math.random().toString(36).substring(7);
+      const sessionId = reusedFromSessionId || Math.random().toString(36).substring(7);
       navigate(`/session/${sessionId}`, {
         state: {
           type: formData.searchType,
           formData: toPersistableFormData(formData),
+          replacePersisted: Boolean(reusedFromSessionId),
         },
       });
       return;

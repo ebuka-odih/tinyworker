@@ -29,6 +29,18 @@ const BLOCKED_TITLE_PATTERNS = [
   /\bview all jobs\b/i,
 ]
 
+const SCHOLARSHIP_KEYWORDS = ['scholarship', 'scholarships', 'fellowship', 'fellowships', 'grant', 'grants', 'bursary', 'bursaries', 'funding']
+const BLOCKED_SCHOLARSHIP_TITLE_PATTERNS = [
+  /\bapplicant advice\b/i,
+  /\bapplication advice\b/i,
+  /\bapplication guide\b/i,
+  /\bhow to apply\b/i,
+  /\bfrequently asked questions\b/i,
+  /\bfaq\b/i,
+  /\bguidance\b/i,
+  /\bwebinar\b/i,
+]
+
 const BLOCKED_QUERY_KEYS = new Set(['l', 'location', 'page', 'q', 'query', 'radius', 'search', 'sort'])
 const BLOCKED_TERMINAL_SEGMENTS = new Set([
   'all-jobs',
@@ -40,6 +52,26 @@ const BLOCKED_TERMINAL_SEGMENTS = new Set([
   'roles',
   'search',
   'vacancies',
+])
+
+const BLOCKED_SCHOLARSHIP_SEGMENTS = new Set([
+  'advice',
+  'admissions',
+  'advice-for-applicants',
+  'applicant-advice',
+  'apply',
+  'blog',
+  'contact',
+  'events',
+  'faq',
+  'faqs',
+  'guidance',
+  'how-to-apply',
+  'information',
+  'news',
+  'resources',
+  'search',
+  'webinars',
 ])
 
 const MAX_ALLOWED_AGE_DAYS_FALLBACK = 21
@@ -64,6 +96,12 @@ function titleLooksLikeListingPage(title: string | undefined | null): boolean {
   const normalized = String(title || '').trim()
   if (!normalized) return false
   return BLOCKED_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function titleLooksLikeScholarshipAdvicePage(title: string | undefined | null): boolean {
+  const normalized = String(title || '').trim()
+  if (!normalized) return false
+  return BLOCKED_SCHOLARSHIP_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))
 }
 
 function getPathSegments(url: URL): string[] {
@@ -195,7 +233,77 @@ function isGenericJobUrl(url: URL): boolean {
   return segments.length >= 2
 }
 
+function titleHasScholarshipKeyword(title: string | undefined | null): boolean {
+  const normalized = normalizeText(title)
+  if (!normalized) return false
+  return SCHOLARSHIP_KEYWORDS.some((keyword) => normalized.includes(keyword))
+}
+
+function pathHasScholarshipKeyword(segments: string[]): boolean {
+  return segments.some((segment) => SCHOLARSHIP_KEYWORDS.some((keyword) => segment.includes(keyword)))
+}
+
+function isScholarshipPortalUrl(url: URL): boolean {
+  const segments = getPathSegments(url)
+  const index = segments.indexOf('scholarships')
+  return index >= 0 && Boolean(segments[index + 1]) && !hasBlockedSearchParams(url)
+}
+
+function isMastersPortalScholarshipUrl(url: URL): boolean {
+  const segments = getPathSegments(url)
+  const index = segments.indexOf('scholarships')
+  return index >= 0 && Boolean(segments[index + 1]) && !hasBlockedSearchParams(url)
+}
+
+function isBachelorstudiesScholarshipUrl(url: URL): boolean {
+  const segments = getPathSegments(url)
+  if (hasBlockedSearchParams(url)) return false
+  return pathHasScholarshipKeyword(segments) && Boolean(segments[segments.length - 1])
+}
+
+function isScholarshipAdviceLikePath(url: URL): boolean {
+  const segments = getPathSegments(url)
+  return segments.some((segment) => BLOCKED_SCHOLARSHIP_SEGMENTS.has(segment))
+}
+
+function isProviderScholarshipUrl(url: URL, title: string | undefined | null): boolean {
+  const segments = getPathSegments(url)
+  if (hasBlockedSearchParams(url)) return false
+  if (isScholarshipAdviceLikePath(url)) return false
+  if (!Boolean(segments[segments.length - 1])) return false
+  return titleHasScholarshipKeyword(title) || pathHasScholarshipKeyword(segments)
+}
+
+function isGenericScholarshipUrl(url: URL, title: string | undefined | null): boolean {
+  const segments = getPathSegments(url)
+  if (!segments.length) return false
+  if (hasBlockedSearchParams(url)) return false
+  if (isScholarshipAdviceLikePath(url)) return false
+  const terminal = segments[segments.length - 1]
+  if (!terminal || BLOCKED_TERMINAL_SEGMENTS.has(terminal)) return false
+  return titleHasScholarshipKeyword(title) || pathHasScholarshipKeyword(segments)
+}
+
 export function canonicalizeJobUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    parsed.hash = ''
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (TRACKING_QUERY_KEYS.has(key.toLowerCase())) {
+        parsed.searchParams.delete(key)
+      }
+    }
+    parsed.searchParams.sort()
+    if (!parsed.searchParams.toString()) {
+      parsed.search = ''
+    }
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+export function canonicalizeScholarshipUrl(url: string): string | null {
   try {
     const parsed = new URL(url)
     parsed.hash = ''
@@ -241,6 +349,27 @@ export function isLikelyJobPostingCandidate(candidate: Pick<ValyuDiscoveredCandi
     if (host.endsWith('ashbyhq.com')) return isAshbyJobUrl(parsed)
     if (host.endsWith('djinni.co')) return isDjinniJobUrl(parsed)
     return isGenericJobUrl(parsed)
+  } catch {
+    return false
+  }
+}
+
+export function isLikelyScholarshipCandidate(candidate: Pick<ValyuDiscoveredCandidate, 'title' | 'url'>): boolean {
+  if (!canonicalizeScholarshipUrl(candidate.url)) return false
+  if (!titleHasScholarshipKeyword(candidate.title)) return false
+  if (titleLooksLikeScholarshipAdvicePage(candidate.title)) return false
+
+  try {
+    const parsed = new URL(candidate.url)
+    const host = toHost(parsed.hostname)
+    if (host.endsWith('scholarshipportal.com')) return isScholarshipPortalUrl(parsed)
+    if (host.endsWith('mastersportal.com')) return isMastersPortalScholarshipUrl(parsed)
+    if (host.endsWith('bachelorstudies.com')) return isBachelorstudiesScholarshipUrl(parsed)
+    if (host.endsWith('daad.de')) return isProviderScholarshipUrl(parsed, candidate.title)
+    if (host.endsWith('chevening.org')) return isProviderScholarshipUrl(parsed, candidate.title)
+    if (host.endsWith('cscuk.fcdo.gov.uk')) return isProviderScholarshipUrl(parsed, candidate.title)
+    if (host.endsWith('opportunitiesforafricans.com')) return isProviderScholarshipUrl(parsed, candidate.title)
+    return isGenericScholarshipUrl(parsed, candidate.title)
   } catch {
     return false
   }
@@ -322,6 +451,9 @@ export function readyResultScore(item: SearchRunResultItem): number {
     item.employmentType,
     item.workMode,
     item.postedDate,
+    item.deadline,
+    item.studyLevel,
+    item.fundingType,
     item.matchReason,
     item.snippet,
     ...(item.requirements || []),
@@ -335,6 +467,33 @@ export function readyResultScore(item: SearchRunResultItem): number {
     (item.relevance || 0) * 4 +
     (isReadyLike(item.queueStatus) ? 6 : item.queueStatus === 'extracting' ? 2 : item.queueStatus === 'queued' ? 1 : 0)
   )
+}
+
+export function filterAndDeduplicateScholarshipCandidates(
+  candidates: ValyuDiscoveredCandidate[],
+  options?: { maxAgeDays?: number },
+): ValyuDiscoveredCandidate[] {
+  const byCanonicalUrl = new Map<string, ValyuDiscoveredCandidate>()
+  const maxAgeDays = Math.max(1, Number(options?.maxAgeDays || 365))
+
+  for (const candidate of candidates) {
+    const canonicalUrl = canonicalizeScholarshipUrl(candidate.url)
+    if (!canonicalUrl) continue
+    if (!isLikelyScholarshipCandidate(candidate)) continue
+    if (!isRecentJobPostingValue(candidate.publicationDate, maxAgeDays)) continue
+
+    const normalized: ValyuDiscoveredCandidate = {
+      ...candidate,
+      url: canonicalUrl,
+    }
+
+    const existing = byCanonicalUrl.get(canonicalUrl)
+    if (!existing || discoveryScore(normalized) > discoveryScore(existing)) {
+      byCanonicalUrl.set(canonicalUrl, normalized)
+    }
+  }
+
+  return Array.from(byCanonicalUrl.values()).sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
 }
 
 export function deduplicateReadyResults(results: SearchRunResultItem[]): SearchRunResultItem[] {

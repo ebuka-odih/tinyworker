@@ -249,7 +249,7 @@ export function NewSearchPage() {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4">
               {recentSearches.map((recent) => (
                 <div key={recent.sessionId} className="rounded-2xl border border-neutral-200 bg-neutral-50/50 p-4 md:p-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

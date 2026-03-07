@@ -45,16 +45,18 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 p-5 border-b border-neutral-100">
-          <div>
-            <h3 className="text-xl font-bold text-neutral-900">{job.title}</h3>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-xl font-bold leading-tight text-neutral-900 break-words">{job.title}</h3>
             <p className="text-sm text-neutral-500 mt-1">
               {job.organization} • {job.location}
             </p>
-            <div className="flex items-center gap-2 mt-2 text-xs text-neutral-500">
-              <span className="px-2 py-0.5 rounded bg-neutral-100 border border-neutral-200">{job.sourceName}</span>
-              <span>{job.sourceDomain}</span>
+            <div className="mt-2 flex flex-wrap items-start gap-2 text-xs text-neutral-500">
+              <span className="max-w-full rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 break-words">
+                {job.sourceName}
+              </span>
+              <span className="min-w-0 break-all">{job.sourceDomain}</span>
               {job.sourceVerified && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
+                <span className="inline-flex max-w-full items-center gap-1 rounded border border-emerald-100 bg-emerald-50 px-2 py-0.5 leading-snug text-emerald-700 whitespace-normal break-words">
                   <CheckCircle2 size={12} />
                   Verified source
                 </span>
@@ -74,7 +76,7 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 transition-all"
+            className="shrink-0 p-2 rounded-lg text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 transition-all"
             aria-label="Close details modal"
           >
             <X size={20} />

@@ -219,4 +219,79 @@ describe('JobSearchRunStore persisted snapshots', () => {
     expect(snapshot?.results).toHaveLength(1)
     expect(snapshot?.counts).toEqual({ queued: 0, ready: 1, failed: 0 })
   })
+
+  it('keeps terminal failed state instead of leaving results stuck in extracting', async () => {
+    const prisma = {
+      jobSearchRun: {
+        create: jest.fn().mockResolvedValue(undefined),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      jobSearchRunEvent: {
+        create: jest.fn().mockResolvedValue(undefined),
+      },
+    }
+
+    const store = new JobSearchRunStore(prisma as any)
+    const { runId } = await store.createRun({
+      userId: 'user-1',
+      query: 'commonwealth scholarship',
+      queryHash: 'q2',
+      intentHash: 'i2',
+      sourceScope: 'global',
+    })
+
+    await store.upsertResult(runId, {
+      id: 'sch-1',
+      opportunityType: 'scholarship',
+      title: 'Applicant Advice Commonwealth Scholarship Commission in the UK',
+      organization: 'Commonwealth Scholarships',
+      location: 'Global',
+      fitScore: 'High',
+      tags: ['Scholarship'],
+      link: 'https://cscuk.fcdo.gov.uk/applicant-advice/',
+      status: 'new',
+      sourceName: 'Commonwealth Scholarships',
+      sourceDomain: 'cscuk.fcdo.gov.uk',
+      sourceType: 'company_careers',
+      sourceVerified: true,
+      queueStatus: 'extracting',
+      relevance: 0.9,
+      snippet: 'Advice page',
+    })
+
+    const updated = await store.upsertResult(runId, {
+      id: 'sch-1',
+      opportunityType: 'scholarship',
+      title: 'Applicant Advice Commonwealth Scholarship Commission in the UK',
+      organization: 'Commonwealth Scholarships',
+      location: 'Global',
+      fitScore: 'High',
+      tags: ['Scholarship'],
+      link: 'https://cscuk.fcdo.gov.uk/applicant-advice/',
+      status: 'new',
+      sourceName: 'Commonwealth Scholarships',
+      sourceDomain: 'cscuk.fcdo.gov.uk',
+      sourceType: 'company_careers',
+      sourceVerified: true,
+      queueStatus: 'failed',
+      relevance: 0.9,
+      snippet: 'TinyFish did not extract enough scholarship detail from this page.',
+    })
+
+    expect(updated).toEqual(
+      expect.objectContaining({
+        id: 'sch-1',
+        queueStatus: 'failed',
+      }),
+    )
+
+    const snapshot = await store.getSnapshot(runId, 'user-1')
+    expect(snapshot?.counts).toEqual({ queued: 0, ready: 0, failed: 1 })
+    expect(snapshot?.results?.[0]).toEqual(
+      expect.objectContaining({
+        id: 'sch-1',
+        queueStatus: 'failed',
+      }),
+    )
+  })
 })

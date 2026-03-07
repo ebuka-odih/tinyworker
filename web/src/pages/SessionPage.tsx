@@ -45,6 +45,7 @@ import { listSavedOpportunities, saveOpportunity } from '../services/opportuniti
 type SessionLocationState = {
   type?: SearchType;
   formData?: JobSearchIntakeData;
+  replacePersisted?: boolean;
 };
 
 type SearchPhase = 'initializing' | 'streaming' | 'background-monitoring' | 'completed' | 'error';
@@ -791,17 +792,27 @@ export function SessionPage() {
     clearRunActivity();
 
     const persisted = id && authUserId ? readPersistedSearchSession(authUserId, id) : null;
-    const nextFormData = persisted?.formData || state.formData || {};
-    const nextSessionType = resolveSessionType(state.type, nextFormData, persisted?.type);
+    const shouldReplacePersisted = Boolean(
+      persisted &&
+        state.replacePersisted &&
+        state.formData &&
+        hasSessionCriteria(state.formData, resolveSessionType(state.type, state.formData, persisted.type)),
+    );
+    const nextFormData = shouldReplacePersisted ? state.formData || {} : persisted?.formData || state.formData || {};
+    const nextSessionType = resolveSessionType(
+      state.type,
+      nextFormData,
+      shouldReplacePersisted ? undefined : persisted?.type,
+    );
 
     setSessionType(nextSessionType);
     setSessionFormData(nextFormData);
     setSelectedJobId(null);
     lastSnapshotStatusRef.current = null;
-    lastSnapshotCountsRef.current = countResultsByQueueStatus(persisted?.results || []);
-    lastSequenceRef.current = Number(persisted?.lastSequence || 0);
+    lastSnapshotCountsRef.current = shouldReplacePersisted ? { ready: 0, failed: 0, queued: 0 } : countResultsByQueueStatus(persisted?.results || []);
+    lastSequenceRef.current = shouldReplacePersisted ? 0 : Number(persisted?.lastSequence || 0);
 
-    if (persisted) {
+    if (persisted && !shouldReplacePersisted) {
       startupModeRef.current = 'resume';
       setStatus(persisted.status);
       setSearchPhase(persisted.searchPhase);

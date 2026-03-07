@@ -470,6 +470,12 @@ export class JobSearchRunStore {
       ...weaker,
       ...stronger,
       id: existing.id,
+      queueStatus: incomingReady || !existingReady ? incoming.queueStatus : existing.queueStatus,
+      queuePosition: incoming.queuePosition ?? existing.queuePosition,
+      snippet:
+        incoming.queueStatus === 'failed'
+          ? incoming.snippet || existing.snippet
+          : stronger.snippet || weaker.snippet,
       tags: Array.from(new Set([...(existing.tags || []), ...(incoming.tags || [])])),
       requirements: stronger.requirements?.length ? stronger.requirements : weaker.requirements,
       responsibilities: stronger.responsibilities?.length ? stronger.responsibilities : weaker.responsibilities,

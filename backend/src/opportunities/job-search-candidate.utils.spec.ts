@@ -1,5 +1,6 @@
 import { SearchRunResultItem } from './job-search-run.store'
 import {
+  filterAndDeduplicateScholarshipCandidates,
   deduplicateReadyResults,
   deriveCandidateJobDetails,
   extractedTitleLooksValid,
@@ -238,6 +239,36 @@ describe('job-search candidate utils', () => {
 
     expect(filtered).toHaveLength(1)
     expect(filtered[0]?.id).toBe('djinni-detail')
+  })
+
+  it('filters scholarship advice pages while keeping likely scholarship detail pages', () => {
+    const filtered = filterAndDeduplicateScholarshipCandidates([
+      {
+        id: 'commonwealth-advice',
+        title: 'Applicant Advice Commonwealth Scholarship Commission in the UK',
+        url: 'https://cscuk.fcdo.gov.uk/applicant-advice/',
+        snippet: 'Advice information for applicants.',
+        relevance: 0.92,
+        sourceName: 'Commonwealth Scholarships',
+        sourceDomain: 'cscuk.fcdo.gov.uk',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+      {
+        id: 'commonwealth-detail',
+        title: 'Commonwealth Master’s Scholarships 2026/2027',
+        url: 'https://cscuk.fcdo.gov.uk/scholarships/commonwealth-masters-scholarships/',
+        snippet: 'Fully funded scholarship for master’s study.',
+        relevance: 0.89,
+        sourceName: 'Commonwealth Scholarships',
+        sourceDomain: 'cscuk.fcdo.gov.uk',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+    ] as any)
+
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.id).toBe('commonwealth-detail')
   })
 
   it('derives role and organization from ATS-style candidate titles', () => {
