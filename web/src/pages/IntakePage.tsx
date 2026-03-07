@@ -126,6 +126,14 @@ const industrySuggestions = ['FinTech', 'HealthTech', 'EdTech', 'AI/ML', 'SaaS',
 const salarySuggestions = ['$60,000', '$80,000', '$100,000', '$120,000+'];
 const intakeTermSuggestions = ['Fall 2026', 'Spring 2027', 'Rolling admissions', 'Next available'];
 const visaTimelineSuggestions = ['Immediately', 'Within 3 months', 'Within 6 months', 'Planning ahead'];
+const scholarshipGoalSuggestions = [
+  'Fully funded MSc Data Science',
+  'Public health scholarship',
+  'MBA scholarship',
+  'PhD funding in AI',
+  'Chevening-style leadership scholarship',
+  'Undergraduate scholarship in Europe',
+];
 
 const stepsByType: Record<SearchType, StepConfig[]> = {
   [SearchType.JOB]: [
@@ -693,6 +701,27 @@ export function IntakePage() {
                 className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-neutral-900 transition-all"
               />
               <p className="mt-2 text-xs text-neutral-500">Use the exact program or scholarship theme you care about most.</p>
+
+              <div className="mt-5">
+                <p className="text-xs uppercase tracking-widest font-bold text-neutral-400 mb-2">Quick options</p>
+                <div className="flex flex-wrap gap-2">
+                  {scholarshipGoalSuggestions.map((goal) => {
+                    const selected = formData.scholarshipQuery.trim().toLowerCase() === goal.toLowerCase();
+                    return (
+                      <button
+                        key={goal}
+                        type="button"
+                        onClick={() => updateFormData('scholarshipQuery', goal)}
+                        className={`px-3 py-1.5 rounded-lg text-sm border transition-all ${
+                          selected ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200 hover:border-neutral-400'
+                        }`}
+                      >
+                        {goal}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         );
@@ -1260,23 +1289,23 @@ export function IntakePage() {
 
         <div className="lg:col-span-3">
           <div className="bg-white rounded-2xl shadow-sm border border-neutral-100 p-6 md:p-12 min-h-[420px] md:min-h-[520px] flex flex-col">
-            <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div>
-                <span className="inline-flex rounded-full bg-neutral-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-500">
-                  {getSearchTypeLabel(formData.searchType)}
-                </span>
-                <h1 className="mt-3 text-[28px] font-bold tracking-tight text-neutral-950">
-                  {formData.searchType === SearchType.JOB && 'Job search intake'}
-                  {formData.searchType === SearchType.SCHOLARSHIP && 'Scholarship search intake'}
-                  {formData.searchType === SearchType.VISA && 'Visa requirement intake'}
-                </h1>
-                <p className="mt-2 text-sm leading-7 text-neutral-500">
-                  {formData.searchType === SearchType.JOB && 'Set the criteria for a live job run, then hand off to the search session.'}
-                  {formData.searchType === SearchType.SCHOLARSHIP && 'Capture structured scholarship criteria now. This flow saves your search setup for reuse while scholarship runs are still offline.'}
-                  {formData.searchType === SearchType.VISA && 'Capture structured visa criteria now. This flow saves your search setup for reuse while visa runs are still offline.'}
-                </p>
+            {formData.searchType !== SearchType.SCHOLARSHIP && (
+              <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <span className="inline-flex rounded-full bg-neutral-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-500">
+                    {getSearchTypeLabel(formData.searchType)}
+                  </span>
+                  <h1 className="mt-3 text-[28px] font-bold tracking-tight text-neutral-950">
+                    {formData.searchType === SearchType.JOB && 'Job search intake'}
+                    {formData.searchType === SearchType.VISA && 'Visa requirement intake'}
+                  </h1>
+                  <p className="mt-2 text-sm leading-7 text-neutral-500">
+                    {formData.searchType === SearchType.JOB && 'Set the criteria for a live job run, then hand off to the search session.'}
+                    {formData.searchType === SearchType.VISA && 'Capture structured visa criteria now. This flow saves your search setup for reuse while visa runs are still offline.'}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             {reusedFromSessionId && (
               <div className="mb-6 p-4 rounded-xl border border-sky-200 bg-sky-50 text-sky-900 flex items-start justify-between gap-4">
