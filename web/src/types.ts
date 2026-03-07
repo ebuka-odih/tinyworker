@@ -4,11 +4,19 @@ export enum SearchType {
   VISA = 'visa',
 }
 
+export interface SearchRunSummary {
+  totalSearchesRun: number;
+  jobsRun: number;
+  scholarshipsRun: number;
+  visasRun: number;
+}
+
 export interface AuthUser {
   userId: string;
   email: string;
   subscriptionTier?: string;
   isPro?: boolean;
+  searchRunSummary: SearchRunSummary;
 }
 
 export type TimelineSeverity = 'info' | 'success' | 'warning' | 'error';

@@ -3,22 +3,47 @@ import { Bell, Bookmark, ExternalLink, Loader2, LogOut, Shield, User } from 'luc
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthContext';
-import { SavedOpportunity } from '../types';
+import { SavedOpportunity, SearchRunSummary } from '../types';
 import { ApiUnauthorizedError } from '../services/apiBase';
 import { listSavedOpportunities } from '../services/opportunitiesApi';
 
+const EMPTY_SEARCH_RUN_SUMMARY: SearchRunSummary = {
+  totalSearchesRun: 0,
+  jobsRun: 0,
+  scholarshipsRun: 0,
+  visasRun: 0,
+};
+
 export function ProfilePage() {
   const navigate = useNavigate();
-  const { accessToken, authUser, signOut } = useAuth();
+  const { accessToken, authUser, refreshAuthUser, signOut } = useAuth();
   const [activeTab, setActiveTab] = React.useState<'saved' | 'settings'>('saved');
   const [savedOpportunities, setSavedOpportunities] = React.useState<SavedOpportunity[]>([]);
   const [savedLoading, setSavedLoading] = React.useState(true);
 
   const initials = React.useMemo(() => authUser?.email?.slice(0, 2).toUpperCase() || 'TW', [authUser?.email]);
-  const handleSignOut = () => {
+  const searchRunSummary = React.useMemo(
+    () => authUser?.searchRunSummary ?? EMPTY_SEARCH_RUN_SUMMARY,
+    [authUser?.searchRunSummary],
+  );
+  const activityCards = React.useMemo(
+    () => [
+      { label: 'Total runs', value: searchRunSummary.totalSearchesRun },
+      { label: 'Jobs', value: searchRunSummary.jobsRun },
+      { label: 'Scholarships', value: searchRunSummary.scholarshipsRun },
+      { label: 'Visas', value: searchRunSummary.visasRun },
+    ],
+    [searchRunSummary],
+  );
+  const handleSignOut = React.useCallback(() => {
     signOut();
     navigate('/auth?next=%2Fnew-search', { replace: true });
-  };
+  }, [navigate, signOut]);
+
+  React.useEffect(() => {
+    if (!accessToken) return;
+    void refreshAuthUser();
+  }, [accessToken, refreshAuthUser]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -48,7 +73,7 @@ export function ProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, handleSignOut]);
 
   return (
     <div className="max-w-4xl mx-auto py-4 md:py-8">
@@ -96,6 +121,28 @@ export function ProfilePage() {
         </div>
 
         <div className="flex-1 w-full space-y-6">
+          <section className="bg-white border border-neutral-200 rounded-3xl p-6 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-widest">Search activity</h3>
+                <p className="mt-2 text-sm leading-6 text-neutral-500 max-w-2xl">
+                  Counts come from persisted backend search runs. Opening pages, clicking cards, editing drafts, and
+                  saving recent searches do not affect these totals.
+                </p>
+              </div>
+              <span className="text-sm font-medium text-neutral-400">{searchRunSummary.totalSearchesRun} total</span>
+            </div>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {activityCards.map((card) => (
+                <div key={card.label} className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-neutral-400">{card.label}</p>
+                  <p className="mt-3 text-3xl font-bold text-neutral-900">{card.value}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
           {activeTab === 'saved' ? (
             <>
               <div className="flex items-center justify-between">

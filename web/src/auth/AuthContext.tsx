@@ -10,6 +10,7 @@ type AuthContextValue = {
   authUser: AuthUser | null;
   authBusy: boolean;
   isAuthenticated: boolean;
+  refreshAuthUser: () => Promise<AuthUser | null>;
   storeAccessToken: (token: string) => void;
   signOut: () => void;
 };
@@ -69,37 +70,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     storeAccessToken('');
   }, [storeAccessToken]);
 
-  React.useEffect(() => {
-    if (!accessToken) {
+  const accessTokenRef = React.useRef(accessToken);
+  accessTokenRef.current = accessToken;
+
+  const refreshAuthUser = React.useCallback(async (): Promise<AuthUser | null> => {
+    const token = String(accessTokenRef.current || '').trim();
+    if (!token) {
       setAuthBusy(false);
       setAuthUser(null);
-      return;
+      return null;
     }
 
-    let cancelled = false;
-
-    const restore = async () => {
-      setAuthBusy(true);
-      try {
-        const user = await fetchAuthUser(accessToken);
-        if (cancelled) return;
-        setAuthUser(user);
-      } catch {
-        if (cancelled) return;
+    setAuthBusy(true);
+    try {
+      const user = await fetchAuthUser(token);
+      if (accessTokenRef.current !== token) return null;
+      setAuthUser(user);
+      return user;
+    } catch {
+      if (accessTokenRef.current === token) {
         storeAccessToken('');
-      } finally {
-        if (!cancelled) {
-          setAuthBusy(false);
-        }
       }
-    };
+      return null;
+    } finally {
+      if (accessTokenRef.current === token || !accessTokenRef.current) {
+        setAuthBusy(false);
+      }
+    }
+  }, [storeAccessToken]);
 
-    void restore();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, storeAccessToken]);
+  React.useEffect(() => {
+    void refreshAuthUser();
+  }, [refreshAuthUser]);
 
   const value = React.useMemo<AuthContextValue>(
     () => ({
@@ -107,10 +109,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authUser,
       authBusy,
       isAuthenticated: Boolean(accessToken && authUser),
+      refreshAuthUser,
       storeAccessToken,
       signOut,
     }),
-    [accessToken, authBusy, authUser, signOut, storeAccessToken],
+    [accessToken, authBusy, authUser, refreshAuthUser, signOut, storeAccessToken],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

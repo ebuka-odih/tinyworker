@@ -1,6 +1,19 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 
+export type UserSearchRunSummary = {
+  totalSearchesRun: number
+  jobsRun: number
+  scholarshipsRun: number
+  visasRun: number
+}
+
+export type AuthenticatedUserSummary = {
+  userId: string
+  email: string
+  searchRunSummary: UserSearchRunSummary
+}
+
 @Injectable()
 export class UsersService {
   constructor(private prisma: PrismaService) {}
@@ -13,6 +26,35 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({ where: { id } })
     if (!user) throw new NotFoundException('User not found')
     return user
+  }
+
+  async getAuthenticatedUserSummary(userId: string): Promise<AuthenticatedUserSummary> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+      },
+    })
+    if (!user) throw new NotFoundException('User not found')
+
+    const [totalSearchesRun, jobsRun, scholarshipsRun, visasRun] = await Promise.all([
+      this.prisma.jobSearchRun.count({ where: { userId: user.id } }),
+      this.prisma.jobSearchRun.count({ where: { userId: user.id, runKind: 'job' } }),
+      this.prisma.jobSearchRun.count({ where: { userId: user.id, runKind: 'scholarship' } }),
+      this.prisma.jobSearchRun.count({ where: { userId: user.id, runKind: 'visa' } }),
+    ])
+
+    return {
+      userId: user.id,
+      email: user.email,
+      searchRunSummary: {
+        totalSearchesRun,
+        jobsRun,
+        scholarshipsRun,
+        visasRun,
+      },
+    }
   }
 
   async createUser(params: { email: string; passwordHash: string; displayName?: string }) {

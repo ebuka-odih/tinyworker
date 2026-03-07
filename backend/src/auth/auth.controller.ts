@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Post, Req, UseGuards } from
 import { z } from 'zod'
 import { AuthService } from './auth.service'
 import { JwtAuthGuard } from './jwt.guard'
+import { UsersService } from '../users/users.service'
 
 const RegisterSchema = z.object({
   email: z.string().email(),
@@ -16,7 +17,10 @@ const LoginSchema = z.object({
 
 @Controller('auth')
 export class AuthController {
-  constructor(private auth: AuthService) {}
+  constructor(
+    private auth: AuthService,
+    private users: UsersService,
+  ) {}
 
   @Post('register')
   async register(@Body() body: any) {
@@ -38,6 +42,6 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('me')
   async me(@Req() req: any) {
-    return { user: req.user }
+    return { user: await this.users.getAuthenticatedUserSummary(req.user.userId as string) }
   }
 }
