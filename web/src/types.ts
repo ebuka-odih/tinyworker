@@ -49,6 +49,7 @@ export interface TimelineItem {
 
 export interface SearchResult {
   id: string;
+  opportunityType?: SearchType;
   title: string;
   organization: string;
   location: string;
@@ -70,6 +71,8 @@ export interface SearchResult {
   employmentType?: string;
   workMode?: string;
   postedDate?: string;
+  studyLevel?: string;
+  fundingType?: string;
   matchReason?: string;
   requirements?: string[];
   responsibilities?: string[];

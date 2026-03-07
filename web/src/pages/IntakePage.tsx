@@ -436,7 +436,7 @@ export function IntakePage() {
       return;
     }
 
-    if (formData.searchType === SearchType.JOB) {
+    if (formData.searchType === SearchType.JOB || formData.searchType === SearchType.SCHOLARSHIP) {
       const sessionId = Math.random().toString(36).substring(7);
       navigate(`/session/${sessionId}`, {
         state: {
@@ -1172,9 +1172,11 @@ export function IntakePage() {
             <div>
               <h2 className="text-[28px] font-bold mb-2">Review your criteria</h2>
               <p className="text-neutral-500 mb-8">
-                {formData.searchType === SearchType.JOB
+                {formData.searchType === SearchType.VISA
+                  ? 'Check your settings before saving this search flow to your recent searches.'
+                  : formData.searchType === SearchType.JOB
                   ? 'Check your required settings before starting the live search.'
-                  : 'Check your settings before saving this search flow to your recent searches.'}
+                  : 'Check your required settings before starting the live scholarship search.'}
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1343,10 +1345,10 @@ export function IntakePage() {
               </div>
             )}
 
-            {steps[currentStep]?.id === 'review' && formData.searchType !== SearchType.JOB && (
+            {steps[currentStep]?.id === 'review' && formData.searchType === SearchType.VISA && (
               <div className="mt-6 p-3 rounded-xl border border-sky-200 bg-sky-50 text-sky-900 flex items-start gap-2">
                 <Sparkles size={16} className="mt-0.5" />
-                <p className="text-sm">This flow saves structured criteria now. Live {formData.searchType === SearchType.SCHOLARSHIP ? 'scholarship' : 'visa'} execution will plug in later.</p>
+                <p className="text-sm">This flow saves structured criteria now. Live visa execution will plug in later.</p>
               </div>
             )}
 
@@ -1367,9 +1369,11 @@ export function IntakePage() {
                 className="flex items-center gap-2 px-8 md:px-10 py-3 bg-neutral-900 text-white rounded-xl font-bold hover:bg-black shadow-xl shadow-neutral-200 active:scale-95 transition-all min-h-[48px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neutral-900"
               >
                 {currentStep === steps.length - 1
-                  ? formData.searchType === SearchType.JOB
+                  ? formData.searchType === SearchType.VISA
+                    ? 'Save Search'
+                    : formData.searchType === SearchType.JOB
                     ? 'Run Search'
-                    : 'Save Search'
+                    : 'Run Scholarship Search'
                   : 'Next Step'}
                 <ArrowRight size={20} />
               </button>

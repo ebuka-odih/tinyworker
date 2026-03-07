@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common'
 import { filterAndDeduplicateDiscoveredCandidates, normalizeDiscoveryQuery } from './job-search-candidate.utils'
 import { resolveSourceMeta } from './job-source-registry'
+import { resolveScholarshipSourceMeta } from './scholarship-source-registry'
 
 type ValyuSearchResult = {
   title?: string
@@ -25,6 +26,12 @@ type JobSearchInput = {
   includedSources?: string[]
 }
 
+type ScholarshipSearchInput = {
+  query: string
+  maxNumResults: number
+  includedSources?: string[]
+}
+
 export type ValyuDiscoveredCandidate = {
   id: string
   title: string
@@ -36,6 +43,20 @@ export type ValyuDiscoveredCandidate = {
   sourceName: string
   sourceDomain: string
   sourceType: 'job_board' | 'ats' | 'company_careers'
+  sourceVerified: boolean
+}
+
+export type ValyuDiscoveredScholarshipCandidate = {
+  id: string
+  title: string
+  url: string
+  snippet: string
+  relevance: number
+  publicationDate?: string
+  sourceLabel?: string
+  sourceName: string
+  sourceDomain: string
+  sourceType: 'job_board' | 'company_careers'
   sourceVerified: boolean
 }
 
@@ -121,6 +142,57 @@ export class ValyuSearchService {
     })
   }
 
+  async discoverScholarshipCandidates(input: ScholarshipSearchInput): Promise<ValyuDiscoveredScholarshipCandidate[]> {
+    const apiKey = process.env.VALYU_API_KEY
+    if (!apiKey) {
+      throw new ServiceUnavailableException('VALYU_API_KEY is not configured')
+    }
+
+    const variants = this.buildScholarshipQueryVariants(input)
+    const aggregated: ValyuDiscoveredScholarshipCandidate[] = []
+
+    for (let variantIndex = 0; variantIndex < variants.length; variantIndex += 1) {
+      const rawResults = await this.executeValyuSearch(apiKey, {
+        query: variants[variantIndex],
+        search_type: 'web',
+        max_num_results: Math.min(20, Math.max(5, input.maxNumResults)),
+        category: 'scholarships',
+        response_length: 'short',
+        fast_mode: true,
+        start_date: this.formatDateDaysAgo(365),
+        end_date: this.formatDateDaysAgo(0),
+        included_sources: input.includedSources?.length ? input.includedSources : undefined,
+      })
+
+      rawResults.forEach((item, idx) => {
+        const relevance = item.relevance_score ?? item.score ?? 0
+        const url = item.url || ''
+        if (!url) return
+        const sourceMeta = resolveScholarshipSourceMeta(url, item.source)
+        aggregated.push({
+          id: `${Date.now()}-sch-${variantIndex}-${idx}`,
+          title: item.title || 'Untitled scholarship',
+          url,
+          snippet: item.snippet || item.description || item.content || '',
+          relevance,
+          publicationDate: item.publication_date || undefined,
+          sourceLabel: item.source || undefined,
+          sourceName: sourceMeta.sourceName,
+          sourceDomain: sourceMeta.sourceDomain,
+          sourceType: sourceMeta.sourceType,
+          sourceVerified: sourceMeta.sourceVerified,
+        })
+      })
+
+      const filtered = this.filterAndDeduplicateScholarshipCandidates(aggregated)
+      if (filtered.length >= input.maxNumResults) {
+        return filtered
+      }
+    }
+
+    return this.filterAndDeduplicateScholarshipCandidates(aggregated)
+  }
+
   private buildQueryVariants(input: JobSearchInput): string[] {
     const original = String(input.query || '').trim()
     const normalized = normalizeDiscoveryQuery(original)
@@ -158,6 +230,45 @@ export class ValyuSearchService {
     return Array.from(variants).filter(Boolean)
   }
 
+  private buildScholarshipQueryVariants(input: ScholarshipSearchInput): string[] {
+    const original = String(input.query || '').trim()
+    const normalized = normalizeDiscoveryQuery(original)
+      .replace(/\bjobs?\b/gi, ' ')
+      .replace(/\brole\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const variants = new Set<string>()
+    const base = normalized || original
+
+    if (original) variants.add(original)
+    if (base) {
+      variants.add(`${base} scholarship`)
+      if (this.hasSource(input.includedSources, 'scholarshipportal.com')) {
+        variants.add(`site:scholarshipportal.com ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'mastersportal.com')) {
+        variants.add(`site:mastersportal.com/scholarships ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'bachelorstudies.com')) {
+        variants.add(`site:bachelorstudies.com ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'daad.de')) {
+        variants.add(`site:daad.de ${base} scholarship`)
+      }
+      if (this.hasSource(input.includedSources, 'chevening.org')) {
+        variants.add(`site:chevening.org ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'cscuk.fcdo.gov.uk')) {
+        variants.add(`site:cscuk.fcdo.gov.uk ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'opportunitiesforafricans.com')) {
+        variants.add(`site:opportunitiesforafricans.com ${base}`)
+      }
+    }
+
+    return Array.from(variants).filter(Boolean)
+  }
+
   private hasSource(includedSources: string[] | undefined, domain: string): boolean {
     if (!includedSources?.length) return true
     return includedSources.some((item) => item === domain)
@@ -168,6 +279,35 @@ export class ValyuSearchService {
     date.setUTCHours(0, 0, 0, 0)
     date.setUTCDate(date.getUTCDate() - Math.max(0, daysAgo))
     return date.toISOString().slice(0, 10)
+  }
+
+  private filterAndDeduplicateScholarshipCandidates(
+    items: ValyuDiscoveredScholarshipCandidate[],
+  ): ValyuDiscoveredScholarshipCandidate[] {
+    const deduped = new Map<string, ValyuDiscoveredScholarshipCandidate>()
+    for (const item of items) {
+      const canonicalUrl = this.canonicalizeUrl(item.url)
+      const key = canonicalUrl || `${String(item.title || '').trim().toLowerCase()}::${String(item.sourceDomain || '').trim().toLowerCase()}`
+      if (!key) continue
+      const existing = deduped.get(key)
+      if (!existing || item.relevance > existing.relevance) {
+        deduped.set(key, item)
+      }
+    }
+
+    return Array.from(deduped.values())
+      .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+      .slice(0, 20)
+  }
+
+  private canonicalizeUrl(url: string): string | null {
+    try {
+      const parsed = new URL(url)
+      parsed.hash = ''
+      return parsed.toString()
+    } catch {
+      return null
+    }
   }
 
   private async executeValyuSearch(apiKey: string, body: Record<string, unknown>): Promise<ValyuSearchResult[]> {

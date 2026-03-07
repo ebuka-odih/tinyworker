@@ -23,6 +23,10 @@ import {
   ApiUnauthorizedError,
   SearchRunEvent,
   SearchRunSnapshot,
+  connectScholarshipSearchRunStream,
+  getScholarshipSearchRunSnapshot,
+  startScholarshipSearchRun,
+  stopScholarshipSearchRun,
   connectJobSearchRunStream,
   getJobSearchRunSnapshot,
   startJobSearchRun,
@@ -36,9 +40,10 @@ import {
 } from '../services/searchSessionStore';
 import { useAuth } from '../auth/AuthContext';
 import { JobDetailsModal } from '../components/JobDetailsModal';
-import { listSavedOpportunities, saveJobOpportunity } from '../services/opportunitiesApi';
+import { listSavedOpportunities, saveOpportunity } from '../services/opportunitiesApi';
 
 type SessionLocationState = {
+  type?: SearchType;
   formData?: JobSearchIntakeData;
 };
 
@@ -103,8 +108,24 @@ const SOURCE_CATALOG = [
   },
 ] as const;
 
-function hasSessionCriteria(formData: JobSearchIntakeData | null | undefined) {
+const SCHOLARSHIP_SOURCE_CATALOG = [
+  { name: 'ScholarshipPortal', domain: 'scholarshipportal.com' },
+  { name: 'MastersPortal', domain: 'mastersportal.com' },
+  { name: 'Bachelorstudies', domain: 'bachelorstudies.com' },
+  { name: 'DAAD', domain: 'daad.de' },
+  { name: 'Chevening', domain: 'chevening.org' },
+  { name: 'Commonwealth Scholarships', domain: 'cscuk.fcdo.gov.uk' },
+  { name: 'Opportunities for Africans', domain: 'opportunitiesforafricans.com' },
+] as const;
+
+function hasSessionCriteria(formData: JobSearchIntakeData | null | undefined, type: SearchType = SearchType.JOB) {
   if (!formData) return false;
+  if (type === SearchType.SCHOLARSHIP) {
+    return Boolean(formData.scholarshipQuery || formData.destinationRegion || formData.studyLevel || formData.academicBackground);
+  }
+  if (type === SearchType.VISA) {
+    return Boolean(formData.visaCountry || formData.visaCategory || formData.nationality || formData.travelReason);
+  }
   return (
     Boolean(formData.location) ||
     Boolean(formData.remote) ||
@@ -215,15 +236,28 @@ function sortSearchResults(items: SearchResult[]) {
   });
 }
 
-function resultIdentity(result: Pick<SearchResult, 'link' | 'title' | 'organization' | 'location'>) {
+function resultIdentity(result: Pick<SearchResult, 'link' | 'title' | 'organization' | 'location' | 'opportunityType'>) {
   const link = String(result.link || '').trim().toLowerCase();
   if (link) return `link:${link}`;
   return [
-    'job',
+    String(result.opportunityType || 'job'),
     String(result.title || '').trim().toLowerCase(),
     String(result.organization || '').trim().toLowerCase(),
     String(result.location || '').trim().toLowerCase(),
   ].join('::');
+}
+
+function resolveSessionType(
+  explicitType: SearchType | undefined,
+  formData: JobSearchIntakeData | null | undefined,
+  persistedType?: SearchType,
+): SearchType {
+  if (explicitType === SearchType.SCHOLARSHIP || explicitType === SearchType.VISA || explicitType === SearchType.JOB) return explicitType;
+  if (persistedType === SearchType.SCHOLARSHIP || persistedType === SearchType.VISA || persistedType === SearchType.JOB) return persistedType;
+  if (formData?.searchType === SearchType.SCHOLARSHIP || formData?.searchType === SearchType.VISA || formData?.searchType === SearchType.JOB) {
+    return formData.searchType;
+  }
+  return SearchType.JOB;
 }
 
 function getSubscriptionTier(authUser: AuthUser | null): 'free' | 'pro' | 'team' {
@@ -269,15 +303,57 @@ export function SessionPage() {
   const subscriptionTier = React.useMemo(() => getSubscriptionTier(authUser), [authUser]);
   const hasAdvancedAccess = subscriptionTier !== 'free';
   const state = (location.state || {}) as SessionLocationState;
+  const initialSessionType = resolveSessionType(state.type, state.formData);
+  const [sessionType, setSessionType] = React.useState<SearchType>(initialSessionType);
   const [sessionFormData, setSessionFormData] = React.useState<JobSearchIntakeData>(state.formData || {});
   const roles = sessionFormData.roles || [];
-  const primaryRole = roles[0] || 'Backend Roles';
-  const locationLabel = sessionFormData.location || 'Any location';
+  const primaryRole = React.useMemo(() => {
+    if (sessionType === SearchType.SCHOLARSHIP) {
+      return sessionFormData.scholarshipQuery || 'Scholarship Search';
+    }
+    if (sessionType === SearchType.VISA) {
+      return sessionFormData.visaCountry ? `${sessionFormData.visaCountry} Visa` : 'Visa Search';
+    }
+    return roles[0] || 'Backend Roles';
+  }, [roles, sessionFormData.scholarshipQuery, sessionFormData.visaCountry, sessionType]);
+  const locationLabel = React.useMemo(() => {
+    if (sessionType === SearchType.SCHOLARSHIP) {
+      return sessionFormData.destinationRegion || 'Any destination';
+    }
+    if (sessionType === SearchType.VISA) {
+      return sessionFormData.currentResidence || sessionFormData.nationality || 'Current profile';
+    }
+    return sessionFormData.location || 'Any location';
+  }, [sessionFormData.currentResidence, sessionFormData.destinationRegion, sessionFormData.location, sessionFormData.nationality, sessionType]);
   const countryCode =
-    sessionFormData.location && sessionFormData.location !== 'Any location'
+    sessionType === SearchType.JOB && sessionFormData.location && sessionFormData.location !== 'Any location'
       ? COUNTRY_CODES[sessionFormData.location]
       : undefined;
   const searchQuery = React.useMemo(() => {
+    if (sessionType === SearchType.SCHOLARSHIP) {
+      return [
+        sessionFormData.scholarshipQuery,
+        sessionFormData.destinationRegion,
+        sessionFormData.studyLevel,
+        sessionFormData.fundingType,
+        sessionFormData.intakeTerm,
+        sessionFormData.academicBackground,
+        'scholarship',
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
+    if (sessionType === SearchType.VISA) {
+      return [
+        sessionFormData.visaCountry,
+        sessionFormData.visaCategory,
+        sessionFormData.nationality,
+        sessionFormData.travelReason,
+        'visa requirements',
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
     const strictMatching = Boolean(sessionFormData.strictMatching);
     const rolePart = roles.length
       ? roles.map((role) => (strictMatching ? `"${role}"` : role)).join(' OR ')
@@ -288,7 +364,25 @@ export function SessionPage() {
     const remotePart = sessionFormData.remote ? 'remote' : '';
     const locationPart = locationLabel !== 'Any location' ? `jobs in ${locationLabel}` : '';
     return [rolePart, locationPart, sponsorshipPart, remotePart].filter(Boolean).join(' ');
-  }, [roles, sessionFormData.strictMatching, sessionFormData.visaSponsorship, sessionFormData.remote, locationLabel]);
+  }, [
+    roles,
+    sessionFormData.academicBackground,
+    sessionFormData.destinationRegion,
+    sessionFormData.fundingType,
+    sessionFormData.intakeTerm,
+    sessionFormData.location,
+    sessionFormData.nationality,
+    sessionFormData.remote,
+    sessionFormData.scholarshipQuery,
+    sessionFormData.strictMatching,
+    sessionFormData.studyLevel,
+    sessionFormData.travelReason,
+    sessionFormData.visaCategory,
+    sessionFormData.visaCountry,
+    sessionFormData.visaSponsorship,
+    locationLabel,
+    sessionType,
+  ]);
 
   const [status, setStatus] = React.useState<'running' | 'paused' | 'completed' | 'error'>('running');
   const [searchPhase, setSearchPhase] = React.useState<SearchPhase>('initializing');
@@ -490,7 +584,14 @@ export function SessionPage() {
       }
 
       if (event.type === 'source_scan_started') {
-        addTimelineEvent('Scanning verified job sources', 'Discovery phase started across trusted job websites.', 'info', 'running');
+        addTimelineEvent(
+          sessionType === SearchType.SCHOLARSHIP ? 'Scanning verified scholarship sources' : 'Scanning verified job sources',
+          sessionType === SearchType.SCHOLARSHIP
+            ? 'Discovery phase started across trusted scholarship websites.'
+            : 'Discovery phase started across trusted job websites.',
+          'info',
+          'running',
+        );
         return;
       }
 
@@ -504,7 +605,12 @@ export function SessionPage() {
       if (event.type === 'candidate_extracting' && event.payload?.result) {
         const item = event.payload.result as SearchResult;
         upsertResult(item);
-        addTimelineEvent('Extracting job details', `Extracting structured fields from ${item.sourceName}.`, 'info', 'running');
+        addTimelineEvent(
+          sessionType === SearchType.SCHOLARSHIP ? 'Extracting scholarship details' : 'Extracting job details',
+          `Extracting structured fields from ${item.sourceName}.`,
+          'info',
+          'running',
+        );
         return;
       }
 
@@ -512,7 +618,12 @@ export function SessionPage() {
         const item = event.payload.result as SearchResult;
         upsertResult(item);
         if (!event.payload?.cacheHit) {
-          addTimelineEvent('Job card ready', `${item.title} is ready from ${item.sourceName}.`, 'success', 'completed');
+          addTimelineEvent(
+            sessionType === SearchType.SCHOLARSHIP ? 'Scholarship card ready' : 'Job card ready',
+            `${item.title} is ready from ${item.sourceName}.`,
+            'success',
+            'completed',
+          );
         }
         return;
       }
@@ -534,7 +645,9 @@ export function SessionPage() {
       if (event.type === 'run_completed') {
         setCacheState((prev) => (prev ? { ...prev, refreshing: false } : null));
         if (event.runId) {
-          void getJobSearchRunSnapshot(event.runId, accessToken)
+          void (sessionType === SearchType.SCHOLARSHIP
+            ? getScholarshipSearchRunSnapshot(event.runId, accessToken)
+            : getJobSearchRunSnapshot(event.runId, accessToken))
             .then((snapshot) => {
               applySnapshot(snapshot);
               finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
@@ -561,7 +674,7 @@ export function SessionPage() {
         finalizeRunState('error', 'error', isTimeout ? 'Run timeout' : 'Search error', details, isTimeout ? 'warning' : 'error');
       }
     },
-    [accessToken, addTimelineEvent, applySnapshot, clearSnapshotPolling, finalizeRunState, upsertResult],
+    [accessToken, addTimelineEvent, applySnapshot, clearSnapshotPolling, finalizeRunState, sessionType, upsertResult],
   );
 
   const flushQueuedEvents = React.useCallback(() => {
@@ -574,7 +687,8 @@ export function SessionPage() {
   const connectToRunStream = React.useCallback(
     (searchRunId: string) => {
       closeStream();
-      streamRef.current = connectJobSearchRunStream({
+      const streamFactory = sessionType === SearchType.SCHOLARSHIP ? connectScholarshipSearchRunStream : connectJobSearchRunStream;
+      streamRef.current = streamFactory({
         runId: searchRunId,
         token: accessToken,
         since: lastSequenceRef.current,
@@ -598,7 +712,7 @@ export function SessionPage() {
         },
       });
     },
-    [accessToken, addTimelineEvent, applyRunEvent, applySnapshot, closeStream, redirectToAuth],
+    [accessToken, addTimelineEvent, applyRunEvent, applySnapshot, closeStream, redirectToAuth, sessionType],
   );
 
   const startSnapshotPolling = React.useCallback(
@@ -609,7 +723,10 @@ export function SessionPage() {
         if (snapshotRequestInFlightRef.current || isCompletedRef.current) return;
         snapshotRequestInFlightRef.current = true;
         try {
-          const snapshot = await getJobSearchRunSnapshot(searchRunId, accessToken);
+          const snapshot =
+            sessionType === SearchType.SCHOLARSHIP
+              ? await getScholarshipSearchRunSnapshot(searchRunId, accessToken)
+              : await getJobSearchRunSnapshot(searchRunId, accessToken);
           applySnapshot(snapshot);
         } catch (error) {
           if (error instanceof ApiUnauthorizedError) {
@@ -629,7 +746,7 @@ export function SessionPage() {
         void poll();
       }, SNAPSHOT_POLL_INTERVAL_MS);
     },
-    [accessToken, addTimelineEvent, applySnapshot, clearSnapshotPolling, redirectToAuth],
+    [accessToken, addTimelineEvent, applySnapshot, clearSnapshotPolling, redirectToAuth, sessionType],
   );
 
   const enterBackgroundMonitoring = React.useCallback(
@@ -675,7 +792,9 @@ export function SessionPage() {
 
     const persisted = id && authUserId ? readPersistedSearchSession(authUserId, id) : null;
     const nextFormData = persisted?.formData || state.formData || {};
+    const nextSessionType = resolveSessionType(state.type, nextFormData, persisted?.type);
 
+    setSessionType(nextSessionType);
     setSessionFormData(nextFormData);
     setSelectedJobId(null);
     lastSnapshotStatusRef.current = null;
@@ -702,7 +821,7 @@ export function SessionPage() {
       return;
     }
 
-    if (hasSessionCriteria(nextFormData)) {
+    if (hasSessionCriteria(nextFormData, nextSessionType)) {
       startupModeRef.current = 'new';
       setStatus('running');
       setSearchPhase('initializing');
@@ -737,7 +856,7 @@ export function SessionPage() {
     setStartedAtMs(null);
     isCompletedRef.current = true;
     setIsHydrated(true);
-  }, [authUserId, clearRunActivity, id, state.formData]);
+  }, [authUserId, clearRunActivity, id, state.formData, state.type]);
 
   React.useEffect(() => {
     if (!id || !isHydrated || !authUserId) return;
@@ -745,7 +864,7 @@ export function SessionPage() {
     const payload: PersistedSearchSession = {
       version: 1,
       sessionId: id,
-      type: SearchType.JOB,
+      type: sessionType,
       formData: sessionFormData,
       status,
       searchPhase,
@@ -761,7 +880,7 @@ export function SessionPage() {
     };
 
     writePersistedSearchSession(authUserId, payload);
-  }, [activeTab, authUserId, cacheState, elapsedTime, id, isHydrated, results, runId, searchPhase, sessionFormData, startedAtMs, status, timeline]);
+  }, [activeTab, authUserId, cacheState, elapsedTime, id, isHydrated, results, runId, searchPhase, sessionFormData, sessionType, startedAtMs, status, timeline]);
 
   React.useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -795,7 +914,10 @@ export function SessionPage() {
 
     const restoreSavedJobs = async () => {
       try {
-        const saved = await listSavedOpportunities(accessToken, 'job');
+        const saved = await listSavedOpportunities(
+          accessToken,
+          sessionType === SearchType.SCHOLARSHIP ? 'scholarship' : sessionType === SearchType.VISA ? 'visa' : 'job',
+        );
         if (cancelled) return;
         const nextKeys = new Set(
           saved.map((item) =>
@@ -804,6 +926,7 @@ export function SessionPage() {
               title: item.title,
               organization: item.organization || '',
               location: item.location || '',
+              opportunityType: sessionType,
             }),
           ),
         );
@@ -830,7 +953,7 @@ export function SessionPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, redirectToAuth]);
+  }, [accessToken, redirectToAuth, sessionType]);
 
   const startNewRun = React.useCallback(async () => {
     isCompletedRef.current = false;
@@ -845,15 +968,23 @@ export function SessionPage() {
     addTimelineEvent('Starting search run', `Running: "${searchQuery}"`, 'info', 'running');
 
     try {
-      const started = await startJobSearchRun({
-        token: accessToken,
-        query: searchQuery,
-        countryCode,
-        maxNumResults: 10,
-        sourceScope: sessionFormData.sourceScope || 'global',
-        remote: sessionFormData.remote,
-        visaSponsorship: sessionFormData.visaSponsorship,
-      });
+      const started =
+        sessionType === SearchType.SCHOLARSHIP
+          ? await startScholarshipSearchRun({
+              token: accessToken,
+              query: searchQuery,
+              maxNumResults: 10,
+              sourceScope: sessionFormData.sourceScope || 'global',
+            })
+          : await startJobSearchRun({
+              token: accessToken,
+              query: searchQuery,
+              countryCode,
+              maxNumResults: 10,
+              sourceScope: sessionFormData.sourceScope || 'global',
+              remote: sessionFormData.remote,
+              visaSponsorship: sessionFormData.visaSponsorship,
+            });
       setRunId(started.runId);
       connectToRunStream(started.runId);
     } catch (error) {
@@ -866,6 +997,7 @@ export function SessionPage() {
     countryCode,
     handleStartFailure,
     searchQuery,
+    sessionType,
     sessionFormData.remote,
     sessionFormData.sourceScope,
     sessionFormData.visaSponsorship,
@@ -883,7 +1015,10 @@ export function SessionPage() {
     }
 
     try {
-      const snapshot = await getJobSearchRunSnapshot(runId, accessToken);
+      const snapshot =
+        sessionType === SearchType.SCHOLARSHIP
+          ? await getScholarshipSearchRunSnapshot(runId, accessToken)
+          : await getJobSearchRunSnapshot(runId, accessToken);
       if (!snapshot) {
         isCompletedRef.current = true;
         setStatus((prev) => (prev === 'error' ? 'error' : 'completed'));
@@ -946,6 +1081,7 @@ export function SessionPage() {
     results.length,
     runId,
     searchPhase,
+    sessionType,
     startedAtMs,
     status,
   ]);
@@ -988,7 +1124,10 @@ export function SessionPage() {
     flushQueuedEvents();
     if (runId && !streamRef.current && searchPhase !== 'background-monitoring') {
       try {
-        const snapshot = await getJobSearchRunSnapshot(runId, accessToken);
+        const snapshot =
+          sessionType === SearchType.SCHOLARSHIP
+            ? await getScholarshipSearchRunSnapshot(runId, accessToken)
+            : await getJobSearchRunSnapshot(runId, accessToken);
         applySnapshot(snapshot);
         connectToRunStream(runId);
       } catch (error) {
@@ -1003,7 +1142,11 @@ export function SessionPage() {
     if (isCompletedRef.current) return;
     if (runId) {
       try {
-        await stopJobSearchRun(runId, accessToken);
+        if (sessionType === SearchType.SCHOLARSHIP) {
+          await stopScholarshipSearchRun(runId, accessToken);
+        } else {
+          await stopJobSearchRun(runId, accessToken);
+        }
       } catch (error) {
         if (error instanceof ApiUnauthorizedError) {
           redirectToAuth();
@@ -1028,12 +1171,17 @@ export function SessionPage() {
 
       setSavingJobIds((prev) => new Set(prev).add(result.id));
       try {
-        const saved = await saveJobOpportunity(accessToken, result);
+      const saved = await saveOpportunity(
+        accessToken,
+        result,
+        sessionType === SearchType.SCHOLARSHIP ? 'scholarship' : sessionType === SearchType.VISA ? 'visa' : 'job',
+      );
         const savedKey = resultIdentity({
           link: saved.link || result.link,
           title: saved.title || result.title,
           organization: saved.organization || result.organization,
           location: saved.location || result.location,
+          opportunityType: result.opportunityType || sessionType,
         });
         setSavedJobKeys((prev) => {
           const next = new Set(prev);
@@ -1047,7 +1195,7 @@ export function SessionPage() {
           redirectToAuth();
           return;
         }
-        const message = error instanceof Error ? error.message : 'Could not save this job right now.';
+        const message = error instanceof Error ? error.message : 'Could not save this opportunity right now.';
         addTimelineEvent('Save failed', message, 'error', 'failed');
       } finally {
         setSavingJobIds((prev) => {
@@ -1057,7 +1205,7 @@ export function SessionPage() {
         });
       }
     },
-    [accessToken, addTimelineEvent, markResultStatus, redirectToAuth, savedJobKeys, savingJobIds],
+    [accessToken, addTimelineEvent, markResultStatus, redirectToAuth, savedJobKeys, savingJobIds, sessionType],
   );
 
   const isSearching = (status === 'running' || status === 'paused') && !isCompletedRef.current;
@@ -1135,6 +1283,13 @@ export function SessionPage() {
       bySource.set(key, current);
     }
     if (!bySource.size) {
+      if (sessionType === SearchType.SCHOLARSHIP) {
+        return [
+          { name: 'ScholarshipPortal', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'MastersPortal', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'DAAD', status: isSearching ? 'Searching' : 'Completed' },
+        ];
+      }
       return [
         { name: 'LinkedIn Jobs', status: isSearching ? 'Searching' : 'Completed' },
         { name: 'Indeed', status: isSearching ? 'Searching' : 'Completed' },
@@ -1142,11 +1297,12 @@ export function SessionPage() {
       ];
     }
     return Array.from(bySource.values()).slice(0, 6);
-  }, [results, isSearching]);
+  }, [results, isSearching, sessionType]);
 
   const visibleSources = React.useMemo(() => {
     const liveStatusBySource = new Map(sourceRows.map((source) => [source.name.toLowerCase(), source.status]));
-    return SOURCE_CATALOG.map((source, index) => ({
+    const catalog = sessionType === SearchType.SCHOLARSHIP ? SCHOLARSHIP_SOURCE_CATALOG : SOURCE_CATALOG;
+    return catalog.map((source, index) => ({
       ...source,
       status: (liveStatusBySource.get(source.name.toLowerCase()) || (isSearching ? 'Queued' : 'Included')) as SourcePanelStatus,
       catalogIndex: index,
@@ -1155,7 +1311,7 @@ export function SessionPage() {
       if (statusDelta !== 0) return statusDelta;
       return a.catalogIndex - b.catalogIndex;
     });
-  }, [isSearching, sourceRows]);
+  }, [isSearching, sessionType, sourceRows]);
 
   const updateSessionAdvancedSetting = React.useCallback(
     (patch: Partial<JobSearchIntakeData>) => {
@@ -1166,13 +1322,13 @@ export function SessionPage() {
   );
 
   const handleEditCriteria = React.useCallback(() => {
-    navigate('/intake/job', {
+    navigate(`/intake/${sessionType}`, {
       state: {
         prefill: sessionFormData,
         reusedFromSessionId: id,
       },
     });
-  }, [id, navigate, sessionFormData]);
+  }, [id, navigate, sessionFormData, sessionType]);
 
   const startedDateLabel = React.useMemo(() => {
     if (!startedAtMs) return new Date().toLocaleDateString();
@@ -1307,24 +1463,65 @@ export function SessionPage() {
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
-                  <div className="pr-3">
-                    <h4 className="font-bold text-neutral-900">Visa sponsorship only</h4>
-                    <p className="text-sm text-neutral-500">Save this preference for the next search.</p>
+                {sessionType === SearchType.JOB ? (
+                  <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
+                    <div className="pr-3">
+                      <h4 className="font-bold text-neutral-900">Visa sponsorship only</h4>
+                      <p className="text-sm text-neutral-500">Save this preference for the next search.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSessionFormData((prev) => ({
+                          ...prev,
+                          visaSponsorship: !prev.visaSponsorship,
+                        }))
+                      }
+                      className={`relative h-6 w-12 rounded-full transition-all ${sessionFormData.visaSponsorship ? 'bg-neutral-900' : 'bg-neutral-200'}`}
+                    >
+                      <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${sessionFormData.visaSponsorship ? 'left-7' : 'left-1'}`} />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSessionFormData((prev) => ({
-                        ...prev,
-                        visaSponsorship: !prev.visaSponsorship,
-                      }))
-                    }
-                    className={`relative h-6 w-12 rounded-full transition-all ${sessionFormData.visaSponsorship ? 'bg-neutral-900' : 'bg-neutral-200'}`}
-                  >
-                    <div className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-all ${sessionFormData.visaSponsorship ? 'left-7' : 'left-1'}`} />
-                  </button>
-                </div>
+                ) : sessionType === SearchType.SCHOLARSHIP ? (
+                  <div className="rounded-xl border border-neutral-200 bg-white p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-neutral-900">Funding preference</h4>
+                        <p className="text-sm text-neutral-500">Keep scholarship funding aligned with your preferred support level.</p>
+                      </div>
+                      {!hasAdvancedAccess && <Lock size={14} className="text-neutral-400" />}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {[
+                        { value: 'Any funding', label: 'Any funding' },
+                        { value: 'Full funding', label: 'Full funding' },
+                      ].map((option) => {
+                        const active = (sessionFormData.fundingType || 'Any funding') === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            disabled={!hasAdvancedAccess}
+                            onClick={() =>
+                              updateSessionAdvancedSetting({
+                                fundingType: option.value as JobSearchIntakeData['fundingType'],
+                              })
+                            }
+                            className={`rounded-xl border px-3 py-2 text-sm font-semibold transition-all ${
+                              active
+                                ? 'border-neutral-900 bg-neutral-900 text-white'
+                                : hasAdvancedAccess
+                                ? 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-400'
+                                : 'border-neutral-200 bg-white text-neutral-400 cursor-not-allowed'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
                   <div className="pr-3">
@@ -1479,7 +1676,7 @@ export function SessionPage() {
               </div>
 
               <p className="mt-3 text-sm leading-6 text-neutral-600">
-                The feed is hidden to keep this page clear. Job cards continue updating in real time.
+                The feed is hidden to keep this page clear. Result cards continue updating in real time.
               </p>
 
               <div className="mt-4 flex items-center justify-end">
@@ -1737,6 +1934,13 @@ export function SessionPage() {
                         <p className="text-xs text-neutral-500 mt-1">
                           Source: {result.sourceName} • {result.sourceDomain}
                         </p>
+                        {result.opportunityType === SearchType.SCHOLARSHIP && (result.deadline || result.studyLevel || result.fundingType) && (
+                          <p className="text-xs text-neutral-500 mt-1">
+                            {[result.deadline ? `Deadline ${result.deadline}` : null, result.studyLevel, result.fundingType]
+                              .filter((value): value is string => Boolean(value))
+                              .join(' • ')}
+                          </p>
+                        )}
                         {result.seenOn && result.seenOn.length > 1 && (
                           <p className="text-xs text-emerald-700 mt-2 font-medium">
                             Seen on {result.seenOn.length} sources: {result.seenOn.map((source) => source.sourceName).join(', ')}

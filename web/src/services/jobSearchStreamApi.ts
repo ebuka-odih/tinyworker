@@ -2,6 +2,7 @@ import { SearchCacheState, SearchResult } from '../types';
 import { API_BASE, ApiUnauthorizedError, buildAuthHeaders, readErrorMessage } from './apiBase';
 
 export { ApiUnauthorizedError } from './apiBase';
+export type SearchRunKind = 'jobs' | 'scholarships';
 
 export type StartSearchRunParams = {
   token: string;
@@ -54,8 +55,8 @@ export type SearchRunSnapshot = {
   cache?: SearchCacheState | null;
 };
 
-export async function startJobSearchRun(params: StartSearchRunParams): Promise<{ runId: string }> {
-  const response = await fetch(`${API_BASE}/opportunities/search/jobs/runs`, {
+async function startSearchRun(kind: SearchRunKind, params: StartSearchRunParams): Promise<{ runId: string }> {
+  const response = await fetch(`${API_BASE}/opportunities/search/${kind}/runs`, {
     method: 'POST',
     headers: buildAuthHeaders(params.token, {
       'Content-Type': 'application/json',
@@ -86,8 +87,8 @@ export async function startJobSearchRun(params: StartSearchRunParams): Promise<{
   return { runId: payload.runId };
 }
 
-export async function stopJobSearchRun(runId: string, token: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(runId)}/stop`, {
+async function stopSearchRun(kind: SearchRunKind, runId: string, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/opportunities/search/${kind}/runs/${encodeURIComponent(runId)}/stop`, {
     method: 'POST',
     headers: buildAuthHeaders(token),
   });
@@ -101,8 +102,8 @@ export async function stopJobSearchRun(runId: string, token: string): Promise<vo
   }
 }
 
-export async function getJobSearchRunSnapshot(runId: string, token: string): Promise<SearchRunSnapshot | null> {
-  const response = await fetch(`${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(runId)}`, {
+async function getSearchRunSnapshot(kind: SearchRunKind, runId: string, token: string): Promise<SearchRunSnapshot | null> {
+  const response = await fetch(`${API_BASE}/opportunities/search/${kind}/runs/${encodeURIComponent(runId)}`, {
     headers: buildAuthHeaders(token),
   });
 
@@ -131,7 +132,7 @@ type StreamParams = {
   onError?: (error: unknown) => void;
 };
 
-export function connectJobSearchRunStream(params: StreamParams): { close: () => void } {
+function connectSearchRunStream(kind: SearchRunKind, params: StreamParams): { close: () => void } {
   let closed = false;
   let currentSince = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : 0;
   let activeController: AbortController | null = null;
@@ -143,7 +144,7 @@ export function connectJobSearchRunStream(params: StreamParams): { close: () => 
 
       try {
         const streamUrl = new URL(
-          `${API_BASE}/opportunities/search/jobs/runs/${encodeURIComponent(params.runId)}/stream`,
+          `${API_BASE}/opportunities/search/${kind}/runs/${encodeURIComponent(params.runId)}/stream`,
           window.location.origin,
         );
         if (currentSince > 0) {
@@ -243,4 +244,36 @@ export function connectJobSearchRunStream(params: StreamParams): { close: () => 
       activeController = null;
     },
   };
+}
+
+export function connectJobSearchRunStream(params: StreamParams): { close: () => void } {
+  return connectSearchRunStream('jobs', params);
+}
+
+export function connectScholarshipSearchRunStream(params: StreamParams): { close: () => void } {
+  return connectSearchRunStream('scholarships', params);
+}
+
+export async function startJobSearchRun(params: StartSearchRunParams): Promise<{ runId: string }> {
+  return await startSearchRun('jobs', params);
+}
+
+export async function startScholarshipSearchRun(params: StartSearchRunParams): Promise<{ runId: string }> {
+  return await startSearchRun('scholarships', params);
+}
+
+export async function stopJobSearchRun(runId: string, token: string): Promise<void> {
+  return await stopSearchRun('jobs', runId, token);
+}
+
+export async function stopScholarshipSearchRun(runId: string, token: string): Promise<void> {
+  return await stopSearchRun('scholarships', runId, token);
+}
+
+export async function getJobSearchRunSnapshot(runId: string, token: string): Promise<SearchRunSnapshot | null> {
+  return await getSearchRunSnapshot('jobs', runId, token);
+}
+
+export async function getScholarshipSearchRunSnapshot(runId: string, token: string): Promise<SearchRunSnapshot | null> {
+  return await getSearchRunSnapshot('scholarships', runId, token);
 }

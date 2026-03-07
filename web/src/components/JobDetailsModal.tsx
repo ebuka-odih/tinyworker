@@ -19,12 +19,17 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
 
   if (!job) return null;
 
+  const isScholarship = job.opportunityType === 'scholarship';
+
   const hasFullDetails = Boolean(
     job.matchReason ||
       job.salary ||
       job.employmentType ||
       job.workMode ||
       job.postedDate ||
+      job.deadline ||
+      job.studyLevel ||
+      job.fundingType ||
       job.requirements?.length ||
       job.responsibilities?.length ||
       job.benefits?.length,
@@ -80,10 +85,10 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
           {!isReady && (
             <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
               <h4 className="text-sm font-bold text-amber-900">Details still loading</h4>
-              <p className="mt-1 text-sm text-amber-800 leading-relaxed">
-                {job.queueStatus === 'failed'
-                  ? 'Full extraction did not complete for this job. You can still review the source listing and any partial details below.'
-                  : 'This job is still being processed. Available source details are shown now, and richer extracted fields will appear once the run finishes.'}
+            <p className="mt-1 text-sm text-amber-800 leading-relaxed">
+              {job.queueStatus === 'failed'
+                  ? `Full extraction did not complete for this ${isScholarship ? 'scholarship' : 'job'}. You can still review the source listing and any partial details below.`
+                  : `This ${isScholarship ? 'scholarship' : 'job'} is still being processed. Available source details are shown now, and richer extracted fields will appear once the run finishes.`}
               </p>
             </section>
           )}
@@ -91,10 +96,16 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Detail label="Fit" value={`${job.fitScore} Fit`} />
             <Detail label="Queue Status" value={queueLabel(job.queueStatus)} />
-            <Detail label="Salary" value={job.salary || 'Not stated'} />
-            <Detail label="Employment" value={job.employmentType || 'Not stated'} />
-            <Detail label="Work Mode" value={job.workMode || 'Not stated'} />
-            <Detail label="Posted" value={job.postedDate || 'Not stated'} />
+            <Detail label={isScholarship ? 'Deadline' : 'Salary'} value={isScholarship ? job.deadline || 'Not stated' : job.salary || 'Not stated'} />
+            <Detail
+              label={isScholarship ? 'Study Level' : 'Employment'}
+              value={isScholarship ? job.studyLevel || 'Not stated' : job.employmentType || 'Not stated'}
+            />
+            <Detail
+              label={isScholarship ? 'Funding' : 'Work Mode'}
+              value={isScholarship ? job.fundingType || 'Not stated' : job.workMode || 'Not stated'}
+            />
+            <Detail label={isScholarship ? 'Destination' : 'Posted'} value={isScholarship ? job.location || 'Not stated' : job.postedDate || 'Not stated'} />
           </div>
 
           {job.matchReason && (
@@ -138,13 +149,21 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
             </section>
           )}
 
-          <ListBlock title="Requirements" items={job.requirements} emptyLabel="Requirements are not available for this job yet." />
           <ListBlock
-            title="Responsibilities"
-            items={job.responsibilities}
-            emptyLabel="Responsibilities are not available for this job yet."
+            title={isScholarship ? 'Eligibility' : 'Requirements'}
+            items={job.requirements}
+            emptyLabel={`${isScholarship ? 'Eligibility details' : 'Requirements'} are not available for this ${isScholarship ? 'scholarship' : 'job'} yet.`}
           />
-          <ListBlock title="Benefits" items={job.benefits} emptyLabel="Benefits are not available for this job yet." />
+          <ListBlock
+            title={isScholarship ? 'Application Steps' : 'Responsibilities'}
+            items={job.responsibilities}
+            emptyLabel={`${isScholarship ? 'Application steps' : 'Responsibilities'} are not available for this ${isScholarship ? 'scholarship' : 'job'} yet.`}
+          />
+          <ListBlock
+            title="Benefits"
+            items={job.benefits}
+            emptyLabel={`Benefits are not available for this ${isScholarship ? 'scholarship' : 'job'} yet.`}
+          />
         </div>
 
         <div className="shrink-0 border-t border-neutral-100 bg-white px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] flex justify-end">

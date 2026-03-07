@@ -28,9 +28,11 @@ export type SearchRunEvent = {
 
 export type SearchRunResultItem = {
   id: string
+  opportunityType?: 'job' | 'scholarship' | 'visa'
   title: string
   organization: string
   location: string
+  deadline?: string
   fitScore: 'High' | 'Medium' | 'Low'
   tags: string[]
   link: string
@@ -47,6 +49,8 @@ export type SearchRunResultItem = {
   employmentType?: string
   workMode?: string
   postedDate?: string
+  studyLevel?: string
+  fundingType?: string
   matchReason?: string
   requirements?: string[]
   responsibilities?: string[]

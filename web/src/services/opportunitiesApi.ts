@@ -36,7 +36,11 @@ export async function listSavedOpportunities(token: string, type: SavedOpportuni
   return Array.isArray(payload.opportunities) ? payload.opportunities.map(mapSavedOpportunity) : [];
 }
 
-export async function saveJobOpportunity(token: string, result: SearchResult): Promise<SavedOpportunity> {
+export async function saveOpportunity(
+  token: string,
+  result: SearchResult,
+  type: SavedOpportunity['type'] = 'job',
+): Promise<SavedOpportunity> {
   const response = await fetch(`${API_BASE}/opportunities/import`, {
     method: 'POST',
     headers: buildAuthHeaders(token, {
@@ -45,14 +49,14 @@ export async function saveJobOpportunity(token: string, result: SearchResult): P
     body: JSON.stringify({
       items: [
         {
-          type: 'job',
+          type,
           title: result.title,
           organization: result.organization || null,
           location: result.location || null,
           description: result.snippet || result.matchReason || null,
           requirements: result.requirements || [],
           link: result.link || null,
-          deadline: null,
+          deadline: result.deadline || null,
           matchScore:
             result.fitScore === 'High' ? 0.9 : result.fitScore === 'Medium' ? 0.7 : result.fitScore === 'Low' ? 0.5 : null,
           source: result.sourceName || 'tinyfinder-web',
@@ -76,4 +80,8 @@ export async function saveJobOpportunity(token: string, result: SearchResult): P
   }
 
   return mapSavedOpportunity(first);
+}
+
+export async function saveJobOpportunity(token: string, result: SearchResult): Promise<SavedOpportunity> {
+  return await saveOpportunity(token, result, 'job');
 }

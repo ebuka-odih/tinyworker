@@ -6,6 +6,8 @@ import { PrismaService } from '../prisma/prisma.service'
 import { JobSearchOrchestrator } from './job-search.orchestrator'
 import { getActiveDiscoveryDomains } from './job-source-registry'
 import { JobSearchRunStore, SearchRunEvent } from './job-search-run.store'
+import { ScholarshipSearchOrchestrator } from './scholarship-search.orchestrator'
+import { getActiveScholarshipDiscoveryDomains } from './scholarship-source-registry'
 import { ValyuSearchService } from './valyu-search.service'
 
 const OpportunityInputSchema = z.object({
@@ -49,6 +51,12 @@ const StartSearchRunSchema = z.object({
   visaSponsorship: z.boolean().optional(),
 })
 
+const ScholarshipSearchQuerySchema = z.object({
+  query: z.string().min(2),
+  maxNumResults: z.coerce.number().int().min(1).max(10).optional(),
+  sourceScope: z.enum(['global', 'regional']).optional(),
+})
+
 @Controller('opportunities')
 @UseGuards(JwtAuthGuard)
 export class OpportunitiesController {
@@ -56,6 +64,7 @@ export class OpportunitiesController {
     private prisma: PrismaService,
     private valyuSearch: ValyuSearchService,
     private jobSearchOrchestrator: JobSearchOrchestrator,
+    private scholarshipSearchOrchestrator: ScholarshipSearchOrchestrator,
     private runStore: JobSearchRunStore,
   ) {}
 
@@ -111,6 +120,133 @@ export class OpportunitiesController {
     })
 
     return { ok: true, ...run }
+  }
+
+  @Get('search/scholarships')
+  async searchScholarships(@Query() query: any) {
+    let parsed: z.infer<typeof ScholarshipSearchQuerySchema>
+    try {
+      parsed = ScholarshipSearchQuerySchema.parse(query || {})
+    } catch (e: any) {
+      throw new BadRequestException({ error: 'Invalid scholarship search query', details: e?.issues || e?.message })
+    }
+
+    const results = await this.valyuSearch.discoverScholarshipCandidates({
+      query: parsed.query,
+      maxNumResults: parsed.maxNumResults ?? 10,
+      includedSources: getActiveScholarshipDiscoveryDomains(parsed.sourceScope || 'global'),
+    })
+
+    return {
+      ok: true,
+      results: results.map((item) => ({
+        id: item.id,
+        opportunityType: 'scholarship',
+        title: item.title,
+        organization: item.sourceName,
+        location: 'Global',
+        fitScore: item.relevance >= 0.8 ? 'High' : item.relevance >= 0.6 ? 'Medium' : 'Low',
+        tags: [item.sourceName, 'Scholarship'],
+        link: item.url,
+        status: 'new',
+        snippet: item.snippet,
+        relevance: item.relevance,
+        sourceName: item.sourceName,
+        sourceDomain: item.sourceDomain,
+        sourceType: item.sourceType,
+        sourceVerified: item.sourceVerified,
+        queueStatus: 'ready',
+      })),
+    }
+  }
+
+  @Post('search/scholarships/runs')
+  async startScholarshipSearchRun(@Req() req: any, @Body() body: any) {
+    let parsed: z.infer<typeof ScholarshipSearchQuerySchema>
+    try {
+      parsed = ScholarshipSearchQuerySchema.parse(body || {})
+    } catch (e: any) {
+      throw new BadRequestException({ error: 'Invalid scholarship run input', details: e?.issues || e?.message })
+    }
+
+    const run = await this.scholarshipSearchOrchestrator.startRun({
+      userId: req.user.userId as string,
+      query: parsed.query,
+      maxNumResults: parsed.maxNumResults ?? 10,
+      sourceScope: parsed.sourceScope || 'global',
+    })
+
+    return { ok: true, ...run }
+  }
+
+  @Get('search/scholarships/runs/:runId')
+  async getScholarshipSearchRunSnapshot(@Req() req: any, @Param('runId') runId: string) {
+    const snapshot = await this.scholarshipSearchOrchestrator.getSnapshot(runId, req.user.userId as string)
+    if (!snapshot) {
+      throw new NotFoundException({ error: 'Scholarship search run not found' })
+    }
+    return { ok: true, snapshot }
+  }
+
+  @Post('search/scholarships/runs/:runId/stop')
+  async stopScholarshipSearchRun(@Req() req: any, @Param('runId') runId: string) {
+    const userId = req.user.userId as string
+    const stopped = await this.scholarshipSearchOrchestrator.stopRun(runId, userId)
+    const snapshot = await this.scholarshipSearchOrchestrator.getSnapshot(runId, userId)
+    return { ok: true, stopped, snapshot }
+  }
+
+  @Get('search/scholarships/runs/:runId/stream')
+  async streamScholarshipSearchRun(
+    @Param('runId') runId: string,
+    @Query('since') sinceRaw: string | undefined,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const since = Number.isFinite(Number(sinceRaw)) ? Math.max(0, Number(sinceRaw)) : 0
+    const userId = req.user.userId as string
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+    ;(res as any).flushHeaders?.()
+
+    const writeEvent = (event: SearchRunEvent) => {
+      const payload = JSON.stringify(event)
+      res.write(`id: ${event.sequence}\n`)
+      res.write(`event: ${event.type}\n`)
+      res.write(`data: ${payload}\n\n`)
+    }
+
+    const events = await this.scholarshipSearchOrchestrator.getEventsSince(runId, userId, since)
+    for (const event of events) {
+      writeEvent(event)
+    }
+
+    const unsubscribe = this.runStore.subscribe(runId, userId, writeEvent)
+    if (!unsubscribe) {
+      const snapshot = await this.scholarshipSearchOrchestrator.getSnapshot(runId, userId)
+      if (snapshot) {
+        res.write(`event: snapshot\n`)
+        res.write(`data: ${JSON.stringify(snapshot)}\n\n`)
+      } else {
+        res.write(`event: run_error\n`)
+        res.write(`data: ${JSON.stringify({ message: 'Run not found' })}\n\n`)
+      }
+      res.end()
+      return
+    }
+
+    const heartbeat = setInterval(() => {
+      res.write(': heartbeat\n\n')
+    }, 15_000)
+
+    req.on('close', () => {
+      clearInterval(heartbeat)
+      unsubscribe()
+      res.end()
+    })
   }
 
   @Get('search/jobs/runs/:runId')
