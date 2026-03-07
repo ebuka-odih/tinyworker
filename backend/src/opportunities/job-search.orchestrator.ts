@@ -83,6 +83,7 @@ export class JobSearchOrchestrator {
 
     const created = await this.runStore.createRun({
       userId: normalized.userId,
+      runKind: 'job',
       query: normalized.query,
       queryHash: cacheIdentity.queryHash,
       intentHash: cacheIdentity.intentHash,

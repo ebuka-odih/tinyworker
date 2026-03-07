@@ -156,6 +156,13 @@ describe('JobSearchOrchestrator cache behavior', () => {
       sourceScope: 'global',
     })
 
+    expect(runStore.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runKind: 'job',
+        query: 'backend engineer',
+      }),
+    )
+
     await flushAsync()
 
     expect(runStore.appendEvent).toHaveBeenCalledWith(

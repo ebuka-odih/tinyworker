@@ -309,7 +309,7 @@ async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function extractRunPayload(run: TinyfishRunStatusResponse | null | undefined): any {
+export function extractTinyfishRunPayload(run: TinyfishRunStatusResponse | null | undefined): any {
   const anyRun = run as any
   if (!anyRun || typeof anyRun !== 'object') return null
   return (
@@ -332,7 +332,7 @@ export async function waitForTinyfishRunCompletion(runId: string): Promise<Tinyf
     const status = String(run.status || '').toUpperCase()
 
     if (status === 'COMPLETED') {
-      const payload = extractRunPayload(run)
+      const payload = extractTinyfishRunPayload(run)
       if (payload != null) return run
       completedWithoutPayloadCount += 1
       if (completedWithoutPayloadCount >= 6) return run
@@ -369,7 +369,7 @@ export async function runTinyfishWithFallback(req: TinyfishRunRequest): Promise<
       return {
         type: 'COMPLETE',
         status: 'COMPLETED',
-        resultJson: extractRunPayload(run),
+        resultJson: extractTinyfishRunPayload(run),
       }
     }
 

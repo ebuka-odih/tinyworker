@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { rankSearchRunResults, readyResultScore, searchRunResultIdentityKey } from './job-search-candidate.utils'
 
 export type SearchRunStatus = 'running' | 'completed' | 'failed' | 'stopped'
+export type SearchRunKind = 'job' | 'scholarship' | 'visa'
 export type SearchRunEventType =
   | 'run_started'
   | 'run_cache_hit'
@@ -70,9 +71,12 @@ export type SearchRunCacheState = {
   refreshing: boolean
 }
 
+export type SearchRunMetrics = Record<string, any>
+
 type RunState = {
   id: string
   userId?: string
+  runKind: SearchRunKind
   query: string
   queryHash: string
   intentHash: string
@@ -88,10 +92,12 @@ type RunState = {
   listeners: Set<(event: SearchRunEvent) => void>
   results: Map<string, SearchRunResultItem>
   cache: SearchRunCacheState | null
+  metrics: SearchRunMetrics | null
 }
 
 type CreateRunInput = {
   userId?: string
+  runKind?: SearchRunKind
   query: string
   queryHash: string
   intentHash: string
@@ -114,9 +120,11 @@ export class JobSearchRunStore {
   async createRun(input: CreateRunInput): Promise<{ runId: string }> {
     const id = randomUUID()
     const startedAt = new Date().toISOString()
+    const runKind = input.runKind || 'job'
     const state: RunState = {
       id,
       userId: input.userId,
+      runKind,
       query: input.query,
       queryHash: input.queryHash,
       intentHash: input.intentHash,
@@ -130,6 +138,7 @@ export class JobSearchRunStore {
       listeners: new Set(),
       results: new Map(),
       cache: null,
+      metrics: null,
     }
     this.runs.set(id, state)
 
@@ -137,6 +146,7 @@ export class JobSearchRunStore {
       data: {
         id,
         userId: input.userId ?? null,
+        runKind,
         query: input.query,
         queryHash: input.queryHash,
         intentHash: input.intentHash,
@@ -241,13 +251,17 @@ export class JobSearchRunStore {
   async appendEvent(runId: string, type: SearchRunEventType, payload?: Record<string, any>): Promise<SearchRunEvent | null> {
     const run = this.runs.get(runId)
     if (!run) return null
+    const nextPayload = payload ? JSON.parse(JSON.stringify(payload)) : null
+    if (nextPayload?.metrics && typeof nextPayload.metrics === 'object') {
+      run.metrics = nextPayload.metrics as SearchRunMetrics
+    }
 
     const event: SearchRunEvent = {
       id: randomUUID(),
       runId,
       sequence: run.nextSequence,
       type,
-      payload: payload || null,
+      payload: nextPayload,
       createdAt: new Date().toISOString(),
     }
     run.nextSequence += 1
@@ -346,6 +360,7 @@ export class JobSearchRunStore {
     const counts = this.countResults(results)
     return {
       runId: persisted.id,
+      runKind: (persisted.runKind as SearchRunKind) || 'job',
       query: persisted.query,
       countryCode: persisted.countryCode || undefined,
       sourceScope: persisted.sourceScope,
@@ -356,6 +371,7 @@ export class JobSearchRunStore {
       lastSequence: persisted.lastSequence,
       counts,
       cache: this.extractCacheStateFromEvents(events, persisted.status as SearchRunStatus),
+      metrics: this.extractMetricsFromEvents(events),
       results,
       events,
     }
@@ -371,6 +387,7 @@ export class JobSearchRunStore {
     const counts = this.countResults(values)
     return {
       runId: run.id,
+      runKind: run.runKind,
       query: run.query,
       countryCode: run.countryCode,
       sourceScope: run.sourceScope,
@@ -381,6 +398,7 @@ export class JobSearchRunStore {
       lastSequence: run.nextSequence - 1,
       counts,
       cache: run.cache,
+      metrics: run.metrics,
       results: values,
       events: run.events,
     }
@@ -500,6 +518,17 @@ export class JobSearchRunStore {
       return {
         ...cache,
         refreshing: status === 'running',
+      }
+    }
+
+    return null
+  }
+
+  private extractMetricsFromEvents(events: SearchRunEvent[]): SearchRunMetrics | null {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const metrics = events[index]?.payload?.metrics
+      if (metrics && typeof metrics === 'object') {
+        return metrics as SearchRunMetrics
       }
     }
 

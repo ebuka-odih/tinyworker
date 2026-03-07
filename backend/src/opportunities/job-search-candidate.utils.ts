@@ -34,10 +34,18 @@ const BLOCKED_SCHOLARSHIP_TITLE_PATTERNS = [
   /\bapplicant advice\b/i,
   /\bapplication advice\b/i,
   /\bapplication guide\b/i,
+  /\babout us\b/i,
+  /\beligible courses?\b/i,
+  /\bfilter search\b/i,
+  /\bfinancial allowances\b/i,
   /\bhow to apply\b/i,
   /\bfrequently asked questions\b/i,
   /\bfaq\b/i,
   /\bguidance\b/i,
+  /\bmeet your programme officers\b/i,
+  /\bprogramme officers?\b/i,
+  /\bscholarships and fellowships\b/i,
+  /\buniversity bid(?:ding|s?)\b/i,
   /\bwebinar\b/i,
 ]
 
@@ -59,19 +67,68 @@ const BLOCKED_SCHOLARSHIP_SEGMENTS = new Set([
   'admissions',
   'advice-for-applicants',
   'applicant-advice',
+  'application-guide',
   'apply',
+  'about-us',
   'blog',
   'contact',
   'events',
   'faq',
   'faqs',
+  'filter-search',
+  'financial-allowances',
   'guidance',
+  'handbook',
   'how-to-apply',
   'information',
+  'meet-your-programme-officers',
   'news',
+  'programme-officers',
   'resources',
   'search',
+  'scholarships-and-fellowships',
+  'university-bidding',
+  'university-bids',
+  'eligible-courses',
   'webinars',
+])
+
+const SCHOLARSHIP_FAMILY_NOISE_PATTERNS = [
+  /\babout us\b/g,
+  /\bapplicant advice\b/g,
+  /\bapplication advice\b/g,
+  /\bapplication guide\b/g,
+  /\beligible courses?\b/g,
+  /\bfaq\b/g,
+  /\bfaqs\b/g,
+  /\bfinancial allowances\b/g,
+  /\bhow to apply\b/g,
+  /\bmeet your programme officers\b/g,
+  /\bprogramme officers?\b/g,
+  /\bscholarships and fellowships\b/g,
+  /\buniversity bid(?:ding|s?)\b/g,
+]
+
+const SCHOLARSHIP_FAMILY_STOP_WORDS = new Set([
+  'about',
+  'advice',
+  'apply',
+  'application',
+  'eligible',
+  'fellowships',
+  'financial',
+  'for',
+  'guide',
+  'guidance',
+  'handbook',
+  'in',
+  'officers',
+  'programme',
+  'scholarships',
+  'search',
+  'the',
+  'to',
+  'uk',
 ])
 
 const MAX_ALLOWED_AGE_DAYS_FALLBACK = 21
@@ -266,6 +323,42 @@ function isScholarshipAdviceLikePath(url: URL): boolean {
   return segments.some((segment) => BLOCKED_SCHOLARSHIP_SEGMENTS.has(segment))
 }
 
+function singularizeScholarshipToken(token: string): string {
+  if (token === 'scholarships') return 'scholarship'
+  if (token === 'fellowships') return 'fellowship'
+  if (token === 'grants') return 'grant'
+  if (token === 'bursaries') return 'bursary'
+  return token
+}
+
+function cleanScholarshipFamilyText(value: string): string {
+  let normalized = normalizeText(value)
+  for (const pattern of SCHOLARSHIP_FAMILY_NOISE_PATTERNS) {
+    normalized = normalized.replace(pattern, ' ')
+  }
+
+  return normalized
+    .split(' ')
+    .map((token) => singularizeScholarshipToken(token))
+    .filter((token) => token && !SCHOLARSHIP_FAMILY_STOP_WORDS.has(token) && !/^\d{4,}$/.test(token))
+    .join(' ')
+    .trim()
+}
+
+function deriveScholarshipPathFamily(url: URL): string {
+  const segments = getPathSegments(url)
+    .filter((segment) => !BLOCKED_SCHOLARSHIP_SEGMENTS.has(segment))
+    .filter((segment) => !BLOCKED_TERMINAL_SEGMENTS.has(segment))
+
+  if (!segments.length) return ''
+
+  const terminal = segments[segments.length - 1] || ''
+  const meaningful = cleanScholarshipFamilyText(terminal.replace(/[-_]+/g, ' '))
+  if (meaningful) return meaningful
+
+  return cleanScholarshipFamilyText(segments.join(' '))
+}
+
 function isProviderScholarshipUrl(url: URL, title: string | undefined | null): boolean {
   const segments = getPathSegments(url)
   if (hasBlockedSearchParams(url)) return false
@@ -372,6 +465,30 @@ export function isLikelyScholarshipCandidate(candidate: Pick<ValyuDiscoveredCand
     return isGenericScholarshipUrl(parsed, candidate.title)
   } catch {
     return false
+  }
+}
+
+export function scholarshipCandidateFamilyKey(
+  candidate: Pick<ValyuDiscoveredCandidate, 'title' | 'url' | 'sourceDomain'>,
+): string {
+  const canonicalUrl = canonicalizeScholarshipUrl(candidate.url)
+  if (!canonicalUrl) {
+    const fallbackHost = toHost(String(candidate.sourceDomain || 'unknown'))
+    const fallbackFamily = cleanScholarshipFamilyText(candidate.title || '') || normalizeText(candidate.title || '') || 'listing'
+    return `${fallbackHost}::${fallbackFamily}`
+  }
+
+  try {
+    const parsed = new URL(canonicalUrl)
+    const host = toHost(parsed.hostname)
+    const titleFamily = cleanScholarshipFamilyText(candidate.title || '')
+    const pathFamily = deriveScholarshipPathFamily(parsed)
+    const family = titleFamily || pathFamily || 'listing'
+    return `${host}::${family}`
+  } catch {
+    const fallbackHost = toHost(String(candidate.sourceDomain || 'unknown'))
+    const fallbackFamily = cleanScholarshipFamilyText(candidate.title || '') || normalizeText(candidate.title || '') || 'listing'
+    return `${fallbackHost}::${fallbackFamily}`
   }
 }
 

@@ -1,6 +1,44 @@
 import { JobSearchRunStore } from './job-search-run.store'
 
 describe('JobSearchRunStore persisted snapshots', () => {
+  it('persists run kind when a new executable run is created', async () => {
+    const prisma = {
+      jobSearchRun: {
+        create: jest.fn().mockResolvedValue(undefined),
+      },
+      jobSearchRunEvent: {
+        create: jest.fn().mockResolvedValue(undefined),
+      },
+    }
+
+    const store = new JobSearchRunStore(prisma as any)
+    const { runId } = await store.createRun({
+      userId: 'user-1',
+      runKind: 'scholarship',
+      query: 'commonwealth scholarship',
+      queryHash: 'q-scholarship',
+      intentHash: 'i-scholarship',
+      sourceScope: 'global',
+    })
+
+    expect(prisma.jobSearchRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: runId,
+        userId: 'user-1',
+        runKind: 'scholarship',
+        query: 'commonwealth scholarship',
+      }),
+    })
+
+    const snapshot = await store.getSnapshot(runId, 'user-1')
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        runId,
+        runKind: 'scholarship',
+      }),
+    )
+  })
+
   it('reconstructs merged results from persisted run events', async () => {
     const prisma = {
       jobSearchRun: {
@@ -291,6 +329,62 @@ describe('JobSearchRunStore persisted snapshots', () => {
       expect.objectContaining({
         id: 'sch-1',
         queueStatus: 'failed',
+      }),
+    )
+  })
+
+  it('surfaces the latest run metrics in snapshots', async () => {
+    const prisma = {
+      jobSearchRun: {
+        create: jest.fn().mockResolvedValue(undefined),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      jobSearchRunEvent: {
+        create: jest.fn().mockResolvedValue(undefined),
+      },
+    }
+
+    const store = new JobSearchRunStore(prisma as any)
+    const { runId } = await store.createRun({
+      userId: 'user-1',
+      runKind: 'scholarship',
+      query: 'commonwealth scholarship',
+      queryHash: 'q3',
+      intentHash: 'i3',
+      sourceScope: 'global',
+    })
+
+    await store.appendEvent(runId, 'run_progress', {
+      stage: 'discovery',
+      ready: 0,
+      failed: 0,
+      queued: 4,
+      metrics: {
+        discovered: 11,
+        filteredOut: 7,
+        selectedForExtraction: 4,
+        extractedReady: 0,
+        extractedFailed: 0,
+        extractionBudget: {
+          maxRunsPerSearch: 4,
+          maxRunsPerDomain: 2,
+          maxRunsPerFamily: 1,
+          sourceScoutEnabled: false,
+        },
+      },
+    })
+
+    const snapshot = await store.getSnapshot(runId, 'user-1')
+    expect(snapshot?.metrics).toEqual(
+      expect.objectContaining({
+        discovered: 11,
+        filteredOut: 7,
+        selectedForExtraction: 4,
+        extractionBudget: expect.objectContaining({
+          maxRunsPerSearch: 4,
+          maxRunsPerDomain: 2,
+          maxRunsPerFamily: 1,
+        }),
       }),
     )
   })

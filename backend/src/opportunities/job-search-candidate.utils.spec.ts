@@ -8,6 +8,7 @@ import {
   isRecentJobPostingValue,
   normalizeDiscoveryQuery,
   rankSearchRunResults,
+  scholarshipCandidateFamilyKey,
 } from './job-search-candidate.utils'
 
 describe('job-search candidate utils', () => {
@@ -269,6 +270,71 @@ describe('job-search candidate utils', () => {
 
     expect(filtered).toHaveLength(1)
     expect(filtered[0]?.id).toBe('commonwealth-detail')
+  })
+
+  it('rejects scholarship utility pages and collapses same-family scholarship siblings', () => {
+    const filtered = filterAndDeduplicateScholarshipCandidates([
+      {
+        id: 'commonwealth-filter',
+        title: 'Scholarships Filter Search - Commonwealth Scholarship Commission in the UK',
+        url: 'https://cscuk.fcdo.gov.uk/scholarships-filter-search/',
+        snippet: 'Filter search page.',
+        relevance: 0.9,
+        sourceName: 'Commonwealth Scholarships',
+        sourceDomain: 'cscuk.fcdo.gov.uk',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+      {
+        id: 'commonwealth-eligible-courses',
+        title: 'Commonwealth Shared Scholarships - eligible courses',
+        url: 'https://cscuk.fcdo.gov.uk/commonwealth-shared-scholarships-eligible-courses/',
+        snippet: 'Eligible courses for Commonwealth Shared Scholarships.',
+        relevance: 0.88,
+        sourceName: 'Commonwealth Scholarships',
+        sourceDomain: 'cscuk.fcdo.gov.uk',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+      {
+        id: 'commonwealth-university-bidding',
+        title: 'Commonwealth Shared Scholarship - university bidding',
+        url: 'https://cscuk.fcdo.gov.uk/commonwealth-shared-scholarship-university-bidding/',
+        snippet: 'University bidding page.',
+        relevance: 0.86,
+        sourceName: 'Commonwealth Scholarships',
+        sourceDomain: 'cscuk.fcdo.gov.uk',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+      {
+        id: 'commonwealth-detail',
+        title: 'Commonwealth Shared Scholarships 2026/2027',
+        url: 'https://cscuk.fcdo.gov.uk/scholarships/commonwealth-shared-scholarships/',
+        snippet: 'Fully funded scholarship.',
+        relevance: 0.91,
+        sourceName: 'Commonwealth Scholarships',
+        sourceDomain: 'cscuk.fcdo.gov.uk',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+    ] as any)
+
+    expect(filtered.map((item) => item.id)).toEqual(['commonwealth-detail'])
+
+    const eligibleCoursesFamily = scholarshipCandidateFamilyKey({
+      title: 'Commonwealth Shared Scholarships - eligible courses',
+      url: 'https://cscuk.fcdo.gov.uk/commonwealth-shared-scholarships-eligible-courses/',
+      sourceDomain: 'cscuk.fcdo.gov.uk',
+    } as any)
+
+    const universityBiddingFamily = scholarshipCandidateFamilyKey({
+      title: 'Commonwealth Shared Scholarship - university bidding',
+      url: 'https://cscuk.fcdo.gov.uk/commonwealth-shared-scholarship-university-bidding/',
+      sourceDomain: 'cscuk.fcdo.gov.uk',
+    } as any)
+
+    expect(eligibleCoursesFamily).toBe(universityBiddingFamily)
   })
 
   it('derives role and organization from ATS-style candidate titles', () => {

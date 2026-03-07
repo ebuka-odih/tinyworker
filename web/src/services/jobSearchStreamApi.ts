@@ -27,6 +27,20 @@ export type SearchRunEventType =
   | 'run_stopped'
   | 'run_error';
 
+export type SearchRunMetrics = {
+  discovered?: number;
+  filteredOut?: number;
+  selectedForExtraction?: number;
+  extractedReady?: number;
+  extractedFailed?: number;
+  extractionBudget?: {
+    maxRunsPerSearch?: number;
+    maxRunsPerDomain?: number;
+    maxRunsPerFamily?: number;
+    sourceScoutEnabled?: boolean;
+  };
+};
+
 export type SearchRunEvent = {
   id?: string;
   runId: string;
@@ -36,6 +50,7 @@ export type SearchRunEvent = {
     result?: SearchResult;
     cache?: SearchCacheState;
     message?: string;
+    metrics?: SearchRunMetrics;
     [key: string]: unknown;
   };
   createdAt?: string;
@@ -53,6 +68,7 @@ export type SearchRunSnapshot = {
   events?: SearchRunEvent[];
   lastSequence?: number;
   cache?: SearchCacheState | null;
+  metrics?: SearchRunMetrics | null;
 };
 
 async function startSearchRun(kind: SearchRunKind, params: StartSearchRunParams): Promise<{ runId: string }> {

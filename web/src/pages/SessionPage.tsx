@@ -22,6 +22,7 @@ import { AuthUser, JobQueueStatus, SearchCacheState, SearchResult, SearchType, T
 import {
   ApiUnauthorizedError,
   SearchRunEvent,
+  SearchRunMetrics,
   SearchRunSnapshot,
   connectScholarshipSearchRunStream,
   getScholarshipSearchRunSnapshot,
@@ -149,6 +150,53 @@ function countResultsByQueueStatus(items: SearchResult[]) {
     },
     { ready: 0, failed: 0, queued: 0 },
   );
+}
+
+function formatScholarshipDiscoverySummary(metrics: SearchRunMetrics | null | undefined) {
+  const discovered = Number(metrics?.discovered || 0);
+  const filteredOut = Number(metrics?.filteredOut || 0);
+  const selected = Number(metrics?.selectedForExtraction || 0);
+  const parts: string[] = [];
+
+  if (discovered > 0) parts.push(`${discovered} links discovered`);
+  if (filteredOut > 0) parts.push(`${filteredOut} filtered out`);
+  if (selected > 0) {
+    parts.push(`${selected} shortlisted for TinyFish`);
+  } else if (discovered > 0) {
+    parts.push('No pages were shortlisted for TinyFish');
+  }
+
+  return parts.join(' • ') || 'Discovery finished across trusted scholarship sources.';
+}
+
+function formatScholarshipExtractionSummary(
+  metrics: SearchRunMetrics | null | undefined,
+  counts: { ready: number; failed: number; queued: number },
+) {
+  const selected = Number(metrics?.selectedForExtraction || 0);
+  const extractedReady = Number(metrics?.extractedReady ?? counts.ready);
+  const extractedFailed = Number(metrics?.extractedFailed ?? counts.failed);
+  const remaining = Math.max(0, counts.queued || selected - extractedReady - extractedFailed);
+  const parts = [
+    selected > 0 ? `${selected} shortlisted` : `${counts.ready + counts.failed + counts.queued} tracked`,
+    `${extractedReady} ready`,
+    `${extractedFailed} failed`,
+  ];
+
+  if (remaining > 0) parts.push(`${remaining} remaining`);
+  return parts.join(' • ');
+}
+
+function formatScholarshipCompletionSummary(metrics: SearchRunMetrics | null | undefined) {
+  const discovered = Number(metrics?.discovered || 0);
+  const selected = Number(metrics?.selectedForExtraction || 0);
+  if (discovered > 0 && selected > 0) {
+    return `Reviewed ${discovered} links and sent ${selected} shortlisted pages to TinyFish. Results are now stable.`;
+  }
+  if (discovered > 0) {
+    return `Reviewed ${discovered} links and finished the scholarship scan. Results are now stable.`;
+  }
+  return 'Queue finished and results are now stable.';
 }
 
 function buildTimelineItem(
@@ -513,6 +561,7 @@ export function SessionPage() {
         ready: Number(snapshot.counts?.ready || 0),
         failed: Number(snapshot.counts?.failed || 0),
       };
+      const metrics = (snapshot.metrics || null) as SearchRunMetrics | null;
 
       if (searchPhase === 'background-monitoring' && snapshot.status === 'running') {
         const previous = lastSnapshotCountsRef.current;
@@ -522,8 +571,10 @@ export function SessionPage() {
           previous.queued !== counts.queued
         ) {
           addTimelineEvent(
-            'Background progress',
-            `${counts.ready} ready • ${counts.failed} failed • ${counts.queued} queued`,
+            sessionType === SearchType.SCHOLARSHIP ? 'Scholarship background progress' : 'Background progress',
+            sessionType === SearchType.SCHOLARSHIP
+              ? formatScholarshipExtractionSummary(metrics, counts)
+              : `${counts.ready} ready • ${counts.failed} failed • ${counts.queued} queued`,
             'info',
             'running',
           );
@@ -535,7 +586,15 @@ export function SessionPage() {
       lastSnapshotStatusRef.current = snapshot.status;
 
       if (snapshot.status === 'completed') {
-        finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
+        finalizeRunState(
+          'completed',
+          'completed',
+          'Search completed',
+          sessionType === SearchType.SCHOLARSHIP
+            ? formatScholarshipCompletionSummary(metrics)
+            : 'Queue finished and results are now stable.',
+          'success',
+        );
         return;
       }
 
@@ -588,7 +647,7 @@ export function SessionPage() {
         addTimelineEvent(
           sessionType === SearchType.SCHOLARSHIP ? 'Scanning verified scholarship sources' : 'Scanning verified job sources',
           sessionType === SearchType.SCHOLARSHIP
-            ? 'Discovery phase started across trusted scholarship websites.'
+            ? 'Valyu is collecting links from trusted scholarship websites before a capped TinyFish shortlist is created.'
             : 'Discovery phase started across trusted job websites.',
           'info',
           'running',
@@ -599,7 +658,14 @@ export function SessionPage() {
       if (event.type === 'candidate_queued' && event.payload?.result) {
         const item = event.payload.result as SearchResult;
         upsertResult(item);
-        addTimelineEvent('Opportunity queued', `${item.title} from ${item.sourceName} is queued for extraction.`, 'info', 'queued');
+        addTimelineEvent(
+          sessionType === SearchType.SCHOLARSHIP ? 'Scholarship shortlisted' : 'Opportunity queued',
+          sessionType === SearchType.SCHOLARSHIP
+            ? `${item.title} from ${item.sourceName} is shortlisted for TinyFish extraction.`
+            : `${item.title} from ${item.sourceName} is queued for extraction.`,
+          'info',
+          'queued',
+        );
         return;
       }
 
@@ -632,33 +698,79 @@ export function SessionPage() {
       if (event.type === 'candidate_failed' && event.payload?.result) {
         const item = event.payload.result as SearchResult;
         upsertResult(item);
-        addTimelineEvent('Source extraction failed', `Could not extract full details for ${item.title}.`, 'warning', 'failed');
+        addTimelineEvent(
+          'Source extraction failed',
+          sessionType === SearchType.SCHOLARSHIP
+            ? `Could not extract a usable scholarship listing for ${item.title}.`
+            : `Could not extract full details for ${item.title}.`,
+          'warning',
+          'failed',
+        );
         return;
       }
 
       if (event.type === 'run_progress') {
         const ready = Number(event.payload?.ready || 0);
         const failed = Number(event.payload?.failed || 0);
+        const queued = Number(event.payload?.queued || 0);
+        const metrics = (event.payload?.metrics || null) as SearchRunMetrics | null;
+        if (sessionType === SearchType.SCHOLARSHIP) {
+          const stage = String(event.payload?.stage || '').toLowerCase();
+          addTimelineEvent(
+            stage === 'discovery' ? 'Scholarship shortlist ready' : 'Scholarship extraction progress',
+            stage === 'discovery'
+              ? formatScholarshipDiscoverySummary(metrics)
+              : formatScholarshipExtractionSummary(metrics, { ready, failed, queued }),
+            'info',
+            'running',
+          );
+          return;
+        }
         addTimelineEvent('Search progress', `${ready} ready • ${failed} failed`, 'info', 'running');
         return;
       }
 
       if (event.type === 'run_completed') {
         setCacheState((prev) => (prev ? { ...prev, refreshing: false } : null));
+        const metrics = (event.payload?.metrics || null) as SearchRunMetrics | null;
         if (event.runId) {
           void (sessionType === SearchType.SCHOLARSHIP
             ? getScholarshipSearchRunSnapshot(event.runId, accessToken)
             : getJobSearchRunSnapshot(event.runId, accessToken))
             .then((snapshot) => {
               applySnapshot(snapshot);
-              finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
+              finalizeRunState(
+                'completed',
+                'completed',
+                'Search completed',
+                sessionType === SearchType.SCHOLARSHIP
+                  ? formatScholarshipCompletionSummary((snapshot?.metrics || metrics) as SearchRunMetrics | null)
+                  : 'Queue finished and results are now stable.',
+                'success',
+              );
             })
             .catch(() => {
-              finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
+              finalizeRunState(
+                'completed',
+                'completed',
+                'Search completed',
+                sessionType === SearchType.SCHOLARSHIP
+                  ? formatScholarshipCompletionSummary(metrics)
+                  : 'Queue finished and results are now stable.',
+                'success',
+              );
             });
           return;
         }
-        finalizeRunState('completed', 'completed', 'Search completed', 'Queue finished and results are now stable.', 'success');
+        finalizeRunState(
+          'completed',
+          'completed',
+          'Search completed',
+          sessionType === SearchType.SCHOLARSHIP
+            ? formatScholarshipCompletionSummary(metrics)
+            : 'Queue finished and results are now stable.',
+          'success',
+        );
         return;
       }
 

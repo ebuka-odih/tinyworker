@@ -193,6 +193,7 @@ model TelegramReport {
 model JobSearchRun {
   id           String   @id @default(uuid())
   userId       String?
+  runKind      String   @default("job")
   query        String
   queryHash    String
   intentHash   String?
@@ -213,6 +214,7 @@ model JobSearchRun {
   events       JobSearchRunEvent[]
 
   @@index([userId, startedAt])
+  @@index([userId, runKind])
   @@index([queryHash, startedAt])
   @@index([intentHash, startedAt])
   @@index([status, startedAt])
