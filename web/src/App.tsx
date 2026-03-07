@@ -6,6 +6,7 @@ import { Layout } from './components/Layout';
 import { AuthPage } from './pages/AuthPage';
 import { LandingPage } from './pages/LandingPage';
 import { IntakePage } from './pages/IntakePage';
+import { NewSearchPage } from './pages/NewSearchPage';
 import { SessionPage } from './pages/SessionPage';
 import { ReportPage } from './pages/ReportPage';
 import { ProfilePage } from './pages/ProfilePage';
@@ -41,7 +42,7 @@ function AppRoutes() {
           path="/new-search"
           element={
             <RequireAuth>
-              <IntakePage />
+              <NewSearchPage />
             </RequireAuth>
           }
         />

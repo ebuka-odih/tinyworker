@@ -18,7 +18,7 @@ import {
   Crown,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { AuthUser, JobQueueStatus, SearchCacheState, SearchResult, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
+import { AuthUser, JobQueueStatus, SearchCacheState, SearchResult, SearchType, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
 import {
   ApiUnauthorizedError,
   SearchRunEvent,
@@ -745,6 +745,7 @@ export function SessionPage() {
     const payload: PersistedSearchSession = {
       version: 1,
       sessionId: id,
+      type: SearchType.JOB,
       formData: sessionFormData,
       status,
       searchPhase,
@@ -1436,7 +1437,12 @@ export function SessionPage() {
         <div className="lg:col-span-3 space-y-4">
           <div className="flex items-center justify-between px-2">
             <div className="flex items-center gap-3">
-              <h3 className="text-sm font-bold text-neutral-900">Live Activity Feed</h3>
+              <h3 className="text-sm font-bold text-neutral-900">Live Activity</h3>
+              {isMobileActivityCollapsed && (
+                <span className="inline-flex lg:hidden items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                  Hidden
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => setIsMobileActivityCollapsed((prev) => !prev)}
@@ -1455,35 +1461,35 @@ export function SessionPage() {
                 )}
               </button>
             </div>
-            <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
-              {isMobileActivityCollapsed ? 'Hidden on mobile' : 'Real-time transparency'}
+            <span className="hidden lg:inline text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+              {isMobileActivityCollapsed ? 'Feed hidden' : 'Real-time transparency'}
             </span>
           </div>
 
           {isMobileActivityCollapsed ? (
-            <div className="lg:hidden rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-3">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-neutral-500">Activity hidden</p>
-                  <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">
-                    {hiddenTimelineCount} update{hiddenTimelineCount === 1 ? '' : 's'}
-                  </span>
+            <div className="lg:hidden rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  Live updates running
                 </div>
+                <span className="shrink-0 rounded-full bg-neutral-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-600">
+                  {hiddenTimelineCount} update{hiddenTimelineCount === 1 ? '' : 's'}
+                </span>
+              </div>
 
-                <p className="text-sm leading-6 text-neutral-500">
-                  Live updates are still running. Open the feed any time to inspect the search timeline.
-                </p>
+              <p className="mt-3 text-sm leading-6 text-neutral-600">
+                The feed is hidden to keep this page clear. Job cards continue updating in real time.
+              </p>
 
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[11px] font-medium text-neutral-400">Job cards stay updated while this is hidden.</span>
-                  <button
-                    type="button"
-                    onClick={() => setIsMobileActivityCollapsed(false)}
-                    className="shrink-0 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-700 transition-all hover:border-neutral-300 hover:text-neutral-900"
-                  >
-                    Show feed
-                  </button>
-                </div>
+              <div className="mt-4 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsMobileActivityCollapsed(false)}
+                  className="shrink-0 rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-700 transition-all hover:border-neutral-300 hover:bg-white hover:text-neutral-900"
+                >
+                  Show feed
+                </button>
               </div>
             </div>
           ) : null}

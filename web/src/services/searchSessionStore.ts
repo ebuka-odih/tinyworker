@@ -1,16 +1,37 @@
-import { SearchCacheState, SearchResult, TimelineItem } from '../types';
+import { SearchCacheState, SearchResult, SearchType, TimelineItem } from '../types';
 
 export type SearchSourceScope = 'global' | 'regional';
 
-export type JobSearchIntakeData = {
+export type SearchIntakeData = {
+  searchType?: SearchType;
   roles?: string[];
   location?: string;
   visaSponsorship?: boolean;
   remote?: boolean;
+  experience?: 'Entry' | 'Mid' | 'Senior';
+  years?: string;
+  industry?: string;
+  salary?: string;
   sourceScope?: SearchSourceScope;
   expandSearch?: boolean;
   strictMatching?: boolean;
+  scholarshipQuery?: string;
+  studyLevel?: 'Undergraduate' | 'Masters' | 'PhD' | 'Professional';
+  destinationRegion?: string;
+  fundingType?: 'Full funding' | 'Partial funding' | 'Tuition only' | 'Any funding';
+  intakeTerm?: string;
+  academicBackground?: string;
+  scholarshipDocumentName?: string | null;
+  visaCountry?: string;
+  visaCategory?: 'Work visa' | 'Student visa' | 'Skilled migration' | 'Digital nomad visa' | 'Tourist visa';
+  nationality?: string;
+  currentResidence?: string;
+  travelReason?: string;
+  visaTimeline?: string;
+  visaDocumentName?: string | null;
 };
+
+export type JobSearchIntakeData = SearchIntakeData;
 
 export type PersistedSearchStatus = 'running' | 'paused' | 'completed' | 'error';
 export type PersistedSearchPhase = 'initializing' | 'streaming' | 'background-monitoring' | 'completed' | 'error';
@@ -19,7 +40,8 @@ export type PersistedSearchTab = 'all' | 'shortlisted' | 'saved';
 export type PersistedSearchSession = {
   version: 1;
   sessionId: string;
-  formData: JobSearchIntakeData;
+  type?: SearchType;
+  formData: SearchIntakeData;
   status: PersistedSearchStatus;
   searchPhase: PersistedSearchPhase;
   elapsedTime: number;
@@ -35,7 +57,8 @@ export type PersistedSearchSession = {
 
 export type RecentSearchSummary = {
   sessionId: string;
-  formData: JobSearchIntakeData;
+  type: SearchType;
+  formData: SearchIntakeData;
   status: PersistedSearchStatus;
   updatedAt: number;
   runId: string | null;
@@ -57,14 +80,25 @@ function getStoragePrefix(userId: string): string {
   return `${STORAGE_PREFIX}${userId}:`;
 }
 
-function hasSearchCriteria(formData: JobSearchIntakeData | null | undefined): boolean {
+function resolveSearchType(sessionType: SearchType | null | undefined, formData: SearchIntakeData | null | undefined): SearchType {
+  if (sessionType === SearchType.SCHOLARSHIP || sessionType === SearchType.VISA || sessionType === SearchType.JOB) {
+    return sessionType;
+  }
+  if (formData?.searchType === SearchType.SCHOLARSHIP || formData?.searchType === SearchType.VISA || formData?.searchType === SearchType.JOB) {
+    return formData.searchType;
+  }
+  return SearchType.JOB;
+}
+
+function hasSearchCriteria(formData: SearchIntakeData | null | undefined, type: SearchType = SearchType.JOB): boolean {
   if (!formData) return false;
-  return (
-    Boolean(formData.location) ||
-    Boolean(formData.remote) ||
-    Boolean(formData.visaSponsorship) ||
-    (Array.isArray(formData.roles) && formData.roles.length > 0)
-  );
+  if (type === SearchType.SCHOLARSHIP) {
+    return Boolean(formData.scholarshipQuery || formData.destinationRegion || formData.studyLevel || formData.academicBackground);
+  }
+  if (type === SearchType.VISA) {
+    return Boolean(formData.visaCountry || formData.visaCategory || formData.nationality || formData.travelReason);
+  }
+  return Boolean(formData.location) || Boolean(formData.remote) || Boolean(formData.visaSponsorship) || (Array.isArray(formData.roles) && formData.roles.length > 0);
 }
 
 function countResults(results: SearchResult[]) {
@@ -86,13 +120,15 @@ function countResults(results: SearchResult[]) {
 function isValidPersistedSession(session: PersistedSearchSession | null | undefined): session is PersistedSearchSession {
   if (!session || session.version !== 1) return false;
   if (!String(session.sessionId || '').trim()) return false;
-  if (!hasSearchCriteria(session.formData)) return false;
+  if (!hasSearchCriteria(session.formData, resolveSearchType(session.type, session.formData))) return false;
   return true;
 }
 
 function toRecentSearchSummary(session: PersistedSearchSession): RecentSearchSummary {
+  const type = resolveSearchType(session.type, session.formData);
   return {
     sessionId: session.sessionId,
+    type,
     formData: session.formData,
     status: session.status,
     updatedAt: Number(session.updatedAt || 0),
@@ -112,7 +148,10 @@ export function readPersistedSearchSession(userId: string, sessionId: string): P
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedSearchSession;
     if (!parsed || parsed.version !== 1 || parsed.sessionId !== safeSessionId) return null;
-    return parsed;
+    return {
+      ...parsed,
+      type: resolveSearchType(parsed.type, parsed.formData),
+    };
   } catch {
     return null;
   }
