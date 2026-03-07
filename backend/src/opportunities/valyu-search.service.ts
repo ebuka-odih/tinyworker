@@ -4,6 +4,7 @@ import {
   filterAndDeduplicateScholarshipCandidates,
   normalizeDiscoveryQuery,
 } from './job-search-candidate.utils'
+import type { JobSearchMode } from './job-search-mode'
 import { resolveSourceMeta } from './job-source-registry'
 import { resolveScholarshipSourceMeta } from './scholarship-source-registry'
 
@@ -27,6 +28,7 @@ type JobSearchInput = {
   query: string
   countryCode?: string
   maxNumResults: number
+  mode?: JobSearchMode
   includedSources?: string[]
 }
 

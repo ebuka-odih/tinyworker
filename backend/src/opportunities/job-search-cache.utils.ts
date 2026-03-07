@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { normalizeDiscoveryQuery, rankSearchRunResults } from './job-search-candidate.utils'
+import type { JobSearchMode } from './job-search-mode'
 import type { JobSourceScope } from './job-source-registry'
 import type { SearchRunResultItem } from './job-search-run.store'
 
@@ -7,6 +8,7 @@ type JobSearchCacheIdentityInput = {
   query: string
   countryCode?: string
   sourceScope: JobSourceScope
+  mode?: JobSearchMode
   remote?: boolean
   visaSponsorship?: boolean
 }
@@ -61,10 +63,12 @@ export function normalizeSearchIntentQuery(query: string): string {
 
 export function buildJobSearchCacheIdentity(input: JobSearchCacheIdentityInput): JobSearchCacheIdentity {
   const normalizedQuery = String(input.query || '').trim()
+  const normalizedMode = input.mode === 'curated' ? 'curated' : undefined
   const normalizedIntent = JSON.stringify({
     query: normalizeSearchIntentQuery(normalizedQuery),
     countryCode: String(input.countryCode || '').trim().toUpperCase(),
     sourceScope: input.sourceScope || 'global',
+    ...(normalizedMode ? { mode: normalizedMode } : {}),
     remote: Boolean(input.remote),
     visaSponsorship: Boolean(input.visaSponsorship),
   })
@@ -73,6 +77,7 @@ export function buildJobSearchCacheIdentity(input: JobSearchCacheIdentityInput):
     query: normalizedQuery,
     countryCode: String(input.countryCode || '').trim().toUpperCase(),
     sourceScope: input.sourceScope || 'global',
+    ...(normalizedMode ? { mode: normalizedMode } : {}),
     remote: Boolean(input.remote),
     visaSponsorship: Boolean(input.visaSponsorship),
   })

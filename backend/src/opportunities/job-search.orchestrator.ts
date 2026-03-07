@@ -15,6 +15,7 @@ import {
   type JobSearchCacheIdentity,
   sliceCachedReadyResults,
 } from './job-search-cache.utils'
+import { type JobSearchMode, resolveJobSearchMode } from './job-search-mode'
 import { getActiveDiscoveryDomains, isHeavyJobSiteDomain, JobSourceScope } from './job-source-registry'
 import {
   JobSearchRunStore,
@@ -29,6 +30,7 @@ type StartSearchRunInput = {
   countryCode?: string
   maxNumResults: number
   sourceScope: JobSourceScope
+  mode?: JobSearchMode
   remote?: boolean
   visaSponsorship?: boolean
 }
@@ -137,6 +139,7 @@ export class JobSearchOrchestrator {
       countryCode: input.countryCode ? String(input.countryCode).trim().toUpperCase() : undefined,
       maxNumResults: Math.max(1, Math.min(10, Number(input.maxNumResults || 10))),
       sourceScope: input.sourceScope || 'global',
+      mode: resolveJobSearchMode(input.mode),
       remote: Boolean(input.remote),
       visaSponsorship: Boolean(input.visaSponsorship),
     }
@@ -151,6 +154,7 @@ export class JobSearchOrchestrator {
       query: input.query,
       countryCode: input.countryCode || null,
       sourceScope: input.sourceScope,
+      mode: input.mode,
       maxNumResults: input.maxNumResults,
       concurrency: ENRICH_CONCURRENCY,
     })
@@ -185,8 +189,9 @@ export class JobSearchOrchestrator {
     }
 
     const runStartedAt = Date.now()
-    const allowedDomains = getActiveDiscoveryDomains(input.sourceScope)
+    const allowedDomains = getActiveDiscoveryDomains(input.sourceScope, input.mode)
     await this.runStore.appendEvent(runId, 'source_scan_started', {
+      mode: input.mode,
       sourceScope: input.sourceScope,
       allowedDomains,
     })
@@ -195,6 +200,7 @@ export class JobSearchOrchestrator {
       query: input.query,
       countryCode: input.countryCode,
       maxNumResults: Math.min(20, input.maxNumResults * 2),
+      mode: input.mode,
       includedSources: allowedDomains,
     })
 

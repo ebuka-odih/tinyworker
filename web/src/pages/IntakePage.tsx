@@ -22,6 +22,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { SearchType } from '../types';
 import { useAuth } from '../auth/AuthContext';
 import {
+  JobSearchMode,
   JobSearchIntakeData,
   PersistedSearchSession,
   SearchIntakeData,
@@ -35,6 +36,7 @@ type StepId =
   | 'experience'
   | 'documents'
   | 'preferences'
+  | 'mode'
   | 'focus'
   | 'destination'
   | 'profile'
@@ -44,6 +46,7 @@ type StepId =
 
 type IntakeFormData = {
   searchType: SearchOptionId;
+  searchMode: JobSearchMode;
   roles: string[];
   location: string;
   remote: boolean;
@@ -135,6 +138,32 @@ const scholarshipGoalSuggestions = [
   'Undergraduate scholarship in Europe',
 ];
 
+const jobSearchModeCards: Array<{
+  value: JobSearchMode;
+  title: string;
+  description: string;
+  summary: string;
+  sources: string[];
+  icon: React.ComponentType<{ size?: number }>;
+}> = [
+  {
+    value: 'classic',
+    title: 'Wide Search',
+    description: 'Covers the broader job web first, then ranks the best current matches back to you.',
+    summary: 'Higher coverage across broad boards and direct ATS sources.',
+    sources: ['LinkedIn Jobs', 'Indeed', 'Glassdoor', 'Greenhouse', 'Lever', 'Ashby'],
+    icon: Globe,
+  },
+  {
+    value: 'curated',
+    title: 'Concise Search',
+    description: 'Focuses on cleaner, higher-signal sources so results are tighter and easier to review.',
+    summary: 'Narrower scan across direct ATS and focused boards.',
+    sources: ['Greenhouse', 'Lever', 'Ashby', 'Djinni'],
+    icon: Sparkles,
+  },
+];
+
 const stepsByType: Record<SearchType, StepConfig[]> = {
   [SearchType.JOB]: [
     { id: 'roles', title: 'Roles', icon: User },
@@ -142,6 +171,7 @@ const stepsByType: Record<SearchType, StepConfig[]> = {
     { id: 'experience', title: 'Experience', icon: Briefcase },
     { id: 'documents', title: 'Documents', icon: FileText },
     { id: 'preferences', title: 'Preferences', icon: Settings },
+    { id: 'mode', title: 'Search Mode', icon: Sparkles },
     { id: 'review', title: 'Review', icon: Check },
   ],
   [SearchType.SCHOLARSHIP]: [
@@ -175,9 +205,14 @@ function getSearchTypeLabel(type: SearchOptionId): string {
   return 'Jobs';
 }
 
+function getJobSearchModeLabel(mode: JobSearchMode): string {
+  return mode === 'curated' ? 'Concise Search' : 'Wide Search';
+}
+
 function buildIntakeFormData(searchType: SearchOptionId, prefill?: SearchIntakeData): IntakeFormData {
   return {
     searchType,
+    searchMode: prefill?.searchMode === 'curated' ? 'curated' : 'classic',
     roles: Array.isArray(prefill?.roles) ? [...prefill.roles] : [],
     location: prefill?.location || '',
     remote: Boolean(prefill?.remote),
@@ -231,6 +266,7 @@ function getPrefillStep(formData: IntakeFormData): number {
 function toPersistableFormData(formData: IntakeFormData): JobSearchIntakeData {
   return {
     searchType: formData.searchType,
+    searchMode: formData.searchMode,
     roles: [...formData.roles],
     location: formData.location,
     remote: formData.remote,
@@ -350,6 +386,8 @@ export function IntakePage() {
           return formData.roles.length > 0 && formData.location && isYearsValid
             ? ''
             : 'Required search criteria is incomplete. Go back and complete missing steps.';
+        case 'mode':
+          return formData.searchMode ? '' : 'Choose how you want this job search to run.';
         default:
           return '';
       }
@@ -526,6 +564,7 @@ export function IntakePage() {
       { label: 'Industry', value: formData.industry || 'Any', step: 4 },
       { label: 'Salary', value: formData.salary || 'Not specified', step: 4 },
       { label: 'Sponsorship', value: formData.visaSponsorship ? 'Required' : 'Not required', step: 4 },
+      { label: 'Search Mode', value: getJobSearchModeLabel(formData.searchMode), step: 5 },
     ];
   };
 
@@ -1201,6 +1240,79 @@ export function IntakePage() {
           </div>
         );
 
+      case 'mode':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-[28px] font-bold mb-2">Choose how to run this search</h2>
+              <p className="text-neutral-500 mb-8">Pick the search mode that best fits the tradeoff you want between breadth and signal quality.</p>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {jobSearchModeCards.map((modeCard) => {
+                  const Icon = modeCard.icon;
+                  const active = formData.searchMode === modeCard.value;
+                  return (
+                    <button
+                      key={modeCard.value}
+                      type="button"
+                      onClick={() => updateFormData('searchMode', modeCard.value)}
+                      className={`rounded-2xl border p-5 text-left transition-all ${
+                        active
+                          ? 'border-neutral-900 bg-neutral-900 text-white shadow-lg shadow-neutral-200'
+                          : 'border-neutral-200 bg-white text-neutral-900 hover:border-neutral-400'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${active ? 'bg-white/15 text-white' : 'bg-neutral-100 text-neutral-700'}`}>
+                          <Icon size={20} />
+                        </div>
+                        {active && (
+                          <span className="inline-flex rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white">
+                            Selected
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="mt-5 text-xl font-bold">{modeCard.title}</h3>
+                      <p className={`mt-2 text-sm leading-6 ${active ? 'text-white/80' : 'text-neutral-500'}`}>{modeCard.description}</p>
+                      <p className={`mt-4 text-xs font-semibold uppercase tracking-[0.18em] ${active ? 'text-white/65' : 'text-neutral-400'}`}>
+                        {modeCard.summary}
+                      </p>
+
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        {modeCard.sources.map((source) => (
+                          <span
+                            key={source}
+                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold ${
+                              active ? 'border-white/15 bg-white/10 text-white' : 'border-neutral-200 bg-neutral-50 text-neutral-600'
+                            }`}
+                          >
+                            <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${active ? 'bg-white/15 text-white' : 'bg-white text-neutral-500'}`}>
+                              {source
+                                .split(' ')
+                                .map((item) => item[0])
+                                .join('')
+                                .slice(0, 2)
+                                .toUpperCase()}
+                            </span>
+                            {source}
+                          </span>
+                        ))}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-6 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
+                {formData.searchMode === 'curated'
+                  ? 'Concise Search starts with a tighter set of higher-signal sources, so the session stays more focused.'
+                  : 'Wide Search keeps the broader source net to maximize coverage before ranking narrows the results.'}
+              </div>
+            </div>
+          </div>
+        );
+
       default:
         return null;
     }
@@ -1292,18 +1404,16 @@ export function IntakePage() {
 
         <div className="lg:col-span-3">
           <div className="bg-white rounded-2xl shadow-sm border border-neutral-100 p-6 md:p-12 min-h-[420px] md:min-h-[520px] flex flex-col">
-            {formData.searchType !== SearchType.SCHOLARSHIP && (
+            {formData.searchType === SearchType.VISA && (
               <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
                   <span className="inline-flex rounded-full bg-neutral-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-500">
                     {getSearchTypeLabel(formData.searchType)}
                   </span>
                   <h1 className="mt-3 text-[28px] font-bold tracking-tight text-neutral-950">
-                    {formData.searchType === SearchType.JOB && 'Job search intake'}
                     {formData.searchType === SearchType.VISA && 'Visa requirement intake'}
                   </h1>
                   <p className="mt-2 text-sm leading-7 text-neutral-500">
-                    {formData.searchType === SearchType.JOB && 'Set the criteria for a live job run, then hand off to the search session.'}
                     {formData.searchType === SearchType.VISA && 'Capture structured visa criteria now. This flow saves your search setup for reuse while visa runs are still offline.'}
                   </p>
                 </div>

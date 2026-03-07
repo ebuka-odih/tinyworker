@@ -41,6 +41,37 @@ describe('job search cache utils', () => {
     expect(base.intentHash).not.toBe(remote.intentHash)
   })
 
+  it('keeps classic cache identity stable and splits curated mode into its own namespace', () => {
+    const classicDefault = buildJobSearchCacheIdentity({
+      query: 'Backend Engineer',
+      countryCode: 'DE',
+      sourceScope: 'global',
+      remote: true,
+      visaSponsorship: false,
+    })
+    const classicExplicit = buildJobSearchCacheIdentity({
+      query: 'Backend Engineer',
+      countryCode: 'DE',
+      sourceScope: 'global',
+      mode: 'classic',
+      remote: true,
+      visaSponsorship: false,
+    })
+    const curated = buildJobSearchCacheIdentity({
+      query: 'Backend Engineer',
+      countryCode: 'DE',
+      sourceScope: 'global',
+      mode: 'curated',
+      remote: true,
+      visaSponsorship: false,
+    })
+
+    expect(classicDefault.intentHash).toBe(classicExplicit.intentHash)
+    expect(classicDefault.queryHash).toBe(classicExplicit.queryHash)
+    expect(curated.intentHash).not.toBe(classicDefault.intentHash)
+    expect(curated.queryHash).not.toBe(classicDefault.queryHash)
+  })
+
   it('normalizes filler terms out of the intent query', () => {
     expect(normalizeSearchIntentQuery('backend engineer jobs in Germany with visa sponsorship remote')).toBe('backend engineer')
   })

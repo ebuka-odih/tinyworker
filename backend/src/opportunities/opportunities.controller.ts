@@ -32,6 +32,7 @@ const SearchJobsQuerySchema = z.object({
   countryCode: z.string().trim().min(2).max(2).optional(),
   maxNumResults: z.coerce.number().int().min(1).max(10).optional(),
   sourceScope: z.enum(['global', 'regional']).optional(),
+  mode: z.enum(['classic', 'curated']).optional(),
   remote: z
     .union([z.boolean(), z.string().transform((value) => value === 'true')])
     .optional()
@@ -47,6 +48,7 @@ const StartSearchRunSchema = z.object({
   countryCode: z.string().trim().min(2).max(2).optional(),
   maxNumResults: z.coerce.number().int().min(1).max(10).optional(),
   sourceScope: z.enum(['global', 'regional']).optional(),
+  mode: z.enum(['classic', 'curated']).optional(),
   remote: z.boolean().optional(),
   visaSponsorship: z.boolean().optional(),
 })
@@ -83,6 +85,7 @@ export class OpportunitiesController {
       countryCode: parsed.countryCode?.toUpperCase(),
       maxNumResults: parsed.maxNumResults ?? 10,
       sourceScope: parsed.sourceScope || 'global',
+      mode: parsed.mode,
       remote: parsed.remote,
       visaSponsorship: parsed.visaSponsorship,
     })
@@ -94,7 +97,8 @@ export class OpportunitiesController {
       query: parsed.query,
       countryCode: parsed.countryCode?.toUpperCase(),
       maxNumResults: parsed.maxNumResults ?? 10,
-      includedSources: getActiveDiscoveryDomains(parsed.sourceScope || 'global'),
+      mode: parsed.mode,
+      includedSources: getActiveDiscoveryDomains(parsed.sourceScope || 'global', parsed.mode || 'classic'),
     })
 
     return { ok: true, results }
@@ -115,6 +119,7 @@ export class OpportunitiesController {
       countryCode: parsed.countryCode?.toUpperCase(),
       maxNumResults: parsed.maxNumResults ?? 10,
       sourceScope: parsed.sourceScope || 'global',
+      mode: parsed.mode,
       remote: parsed.remote,
       visaSponsorship: parsed.visaSponsorship,
     })

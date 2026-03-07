@@ -34,6 +34,7 @@ import {
   stopJobSearchRun,
 } from '../services/jobSearchStreamApi';
 import {
+  JobSearchMode,
   JobSearchIntakeData,
   PersistedSearchSession,
   readPersistedSearchSession,
@@ -65,7 +66,7 @@ const COUNTRY_CODES: Record<string, string> = {
 const SNAPSHOT_POLL_INTERVAL_MS = 5_000;
 type SidebarTab = 'filters' | 'sources';
 type SourcePanelStatus = 'Completed' | 'Searching' | 'Failed' | 'Queued' | 'Included';
-const SOURCE_CATALOG = [
+const WIDE_SOURCE_CATALOG = [
   {
     name: 'LinkedIn Jobs',
     domain: 'linkedin.com/jobs',
@@ -84,6 +85,33 @@ const SOURCE_CATALOG = [
     summary: 'High-signal employer pages and recent openings.',
     emphasis: 'Employer context',
   },
+  {
+    name: 'Greenhouse',
+    domain: 'boards.greenhouse.io',
+    summary: 'Direct ATS listings from tech and startup teams.',
+    emphasis: 'Direct ATS',
+  },
+  {
+    name: 'Lever',
+    domain: 'jobs.lever.co',
+    summary: 'Direct ATS roles that often appear before aggregation.',
+    emphasis: 'Direct ATS',
+  },
+  {
+    name: 'Ashby',
+    domain: 'jobs.ashbyhq.com',
+    summary: 'Fast-moving startup and growth-company hiring.',
+    emphasis: 'Startup ATS',
+  },
+  {
+    name: 'Djinni',
+    domain: 'djinni.co',
+    summary: 'Developer-friendly board with strong European overlap.',
+    emphasis: 'Regional quality',
+  },
+] as const;
+
+const CONCISE_SOURCE_CATALOG = [
   {
     name: 'Greenhouse',
     domain: 'boards.greenhouse.io',
@@ -317,6 +345,14 @@ function getSubscriptionTier(authUser: AuthUser | null): 'free' | 'pro' | 'team'
   return 'free';
 }
 
+function resolveJobSearchMode(formData: JobSearchIntakeData | null | undefined): JobSearchMode {
+  return formData?.searchMode === 'curated' ? 'curated' : 'classic';
+}
+
+function getJobSearchModeLabel(mode: JobSearchMode) {
+  return mode === 'curated' ? 'Concise Search' : 'Wide Search';
+}
+
 function planLabel(tier: 'free' | 'pro' | 'team') {
   if (tier === 'team') return 'Team';
   if (tier === 'pro') return 'Pro';
@@ -355,6 +391,7 @@ export function SessionPage() {
   const initialSessionType = resolveSessionType(state.type, state.formData);
   const [sessionType, setSessionType] = React.useState<SearchType>(initialSessionType);
   const [sessionFormData, setSessionFormData] = React.useState<JobSearchIntakeData>(state.formData || {});
+  const selectedJobSearchMode = React.useMemo(() => resolveJobSearchMode(sessionFormData), [sessionFormData]);
   const roles = sessionFormData.roles || [];
   const primaryRole = React.useMemo(() => {
     if (sessionType === SearchType.SCHOLARSHIP) {
@@ -1102,6 +1139,7 @@ export function SessionPage() {
           : await startJobSearchRun({
               token: accessToken,
               query: searchQuery,
+              mode: selectedJobSearchMode,
               countryCode,
               maxNumResults: 10,
               sourceScope: sessionFormData.sourceScope || 'global',
@@ -1120,6 +1158,7 @@ export function SessionPage() {
     countryCode,
     handleStartFailure,
     searchQuery,
+    selectedJobSearchMode,
     sessionType,
     sessionFormData.remote,
     sessionFormData.sourceScope,
@@ -1413,6 +1452,13 @@ export function SessionPage() {
           { name: 'DAAD', status: isSearching ? 'Searching' : 'Completed' },
         ];
       }
+      if (selectedJobSearchMode === 'curated') {
+        return [
+          { name: 'Greenhouse', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'Lever', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'Ashby', status: isSearching ? 'Searching' : 'Completed' },
+        ];
+      }
       return [
         { name: 'LinkedIn Jobs', status: isSearching ? 'Searching' : 'Completed' },
         { name: 'Indeed', status: isSearching ? 'Searching' : 'Completed' },
@@ -1420,11 +1466,16 @@ export function SessionPage() {
       ];
     }
     return Array.from(bySource.values()).slice(0, 6);
-  }, [results, isSearching, sessionType]);
+  }, [results, isSearching, selectedJobSearchMode, sessionType]);
 
   const visibleSources = React.useMemo(() => {
     const liveStatusBySource = new Map(sourceRows.map((source) => [source.name.toLowerCase(), source.status]));
-    const catalog = sessionType === SearchType.SCHOLARSHIP ? SCHOLARSHIP_SOURCE_CATALOG : SOURCE_CATALOG;
+    const catalog =
+      sessionType === SearchType.SCHOLARSHIP
+        ? SCHOLARSHIP_SOURCE_CATALOG
+        : selectedJobSearchMode === 'curated'
+        ? CONCISE_SOURCE_CATALOG
+        : WIDE_SOURCE_CATALOG;
     return catalog.map((source, index) => ({
       ...source,
       status: (liveStatusBySource.get(source.name.toLowerCase()) || (isSearching ? 'Queued' : 'Included')) as SourcePanelStatus,
@@ -1434,7 +1485,7 @@ export function SessionPage() {
       if (statusDelta !== 0) return statusDelta;
       return a.catalogIndex - b.catalogIndex;
     });
-  }, [isSearching, sessionType, sourceRows]);
+  }, [isSearching, selectedJobSearchMode, sessionType, sourceRows]);
 
   const updateSessionAdvancedSetting = React.useCallback(
     (patch: Partial<JobSearchIntakeData>) => {
@@ -1471,6 +1522,11 @@ export function SessionPage() {
                 {status === 'running' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
                 {status}
               </div>
+              {sessionType === SearchType.JOB && (
+                <div className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-neutral-100 text-neutral-700">
+                  {getJobSearchModeLabel(selectedJobSearchMode)}
+                </div>
+              )}
               {searchPhase === 'background-monitoring' && (
                 <div className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sky-50 text-sky-700">
                   Background Sync
@@ -1567,6 +1623,20 @@ export function SessionPage() {
 
             {sidebarTab === 'filters' ? (
               <div className="space-y-3">
+                {sessionType === SearchType.JOB && (
+                  <div className="rounded-xl border border-neutral-200 bg-white p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-neutral-900">Search mode</h4>
+                        <p className="text-sm text-neutral-500">This run stays in the mode you selected during intake.</p>
+                      </div>
+                      <span className="rounded-full bg-neutral-900 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white">
+                        {selectedJobSearchMode === 'curated' ? 'Concise' : 'Wide'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-4">
                   <div className="pr-3">
                     <h4 className="font-bold text-neutral-900">Expand search</h4>

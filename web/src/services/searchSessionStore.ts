@@ -1,9 +1,11 @@
 import { SearchCacheState, SearchResult, SearchType, TimelineItem } from '../types';
 
 export type SearchSourceScope = 'global' | 'regional';
+export type JobSearchMode = 'classic' | 'curated';
 
 export type SearchIntakeData = {
   searchType?: SearchType;
+  searchMode?: JobSearchMode;
   roles?: string[];
   location?: string;
   visaSponsorship?: boolean;
@@ -164,6 +166,7 @@ function searchFingerprint(type: SearchType, formData: SearchIntakeData): string
     years: normalizeText(formData.years),
     industry: normalizeText(formData.industry),
     salary: normalizeText(formData.salary),
+    searchMode: normalizeText(formData.searchMode || 'classic'),
     sourceScope: normalizeText(formData.sourceScope),
   });
 }

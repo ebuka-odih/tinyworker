@@ -1,5 +1,6 @@
 import { SearchCacheState, SearchResult } from '../types';
 import { API_BASE, ApiUnauthorizedError, buildAuthHeaders, readErrorMessage } from './apiBase';
+import type { JobSearchMode } from './searchSessionStore';
 
 export { ApiUnauthorizedError } from './apiBase';
 export type SearchRunKind = 'jobs' | 'scholarships';
@@ -7,6 +8,7 @@ export type SearchRunKind = 'jobs' | 'scholarships';
 export type StartSearchRunParams = {
   token: string;
   query: string;
+  mode?: JobSearchMode;
   countryCode?: string;
   maxNumResults?: number;
   sourceScope?: 'global' | 'regional';
@@ -79,6 +81,7 @@ async function startSearchRun(kind: SearchRunKind, params: StartSearchRunParams)
     }),
     body: JSON.stringify({
       query: params.query,
+      mode: params.mode ?? 'classic',
       countryCode: params.countryCode,
       maxNumResults: params.maxNumResults ?? 10,
       sourceScope: params.sourceScope ?? 'global',
