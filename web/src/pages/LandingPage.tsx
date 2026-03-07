@@ -1,136 +1,327 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Briefcase, GraduationCap, FileText, ArrowRight, Clock, LogIn, Sparkles } from 'lucide-react';
+import {
+  ArrowRight,
+  Briefcase,
+  CheckCircle2,
+  FileText,
+  GraduationCap,
+  Search,
+  ShieldCheck,
+} from 'lucide-react';
 import { motion } from 'motion/react';
 
 import { useAuth } from '../auth/AuthContext';
 
-const searchTypes = [
+const useCases = [
   {
     id: 'job',
-    title: 'Jobs',
-    description: 'Find verified roles matching your skills and visa requirements.',
+    title: 'Job Search',
+    description:
+      'Search across major job boards and company career pages to find roles that match your skills, experience, and preferred country.',
     icon: Briefcase,
-    time: '2–5 min',
-    color: 'bg-neutral-50 text-neutral-900 border-neutral-100',
-    hoverColor: 'hover:border-neutral-300 hover:shadow-neutral-100',
   },
   {
     id: 'scholarship',
-    title: 'Scholarships',
-    description: 'Discover fully-funded opportunities for your next degree.',
+    title: 'Scholarship Search',
+    description:
+      'Discover scholarships, funding programs, and university opportunities that fit your academic goals and destination preferences.',
     icon: GraduationCap,
-    time: '3–6 min',
-    color: 'bg-neutral-50 text-neutral-900 border-neutral-100',
-    hoverColor: 'hover:border-neutral-300 hover:shadow-neutral-100',
   },
   {
     id: 'visa',
-    title: 'Visa Requirements',
-    description: 'Get structured checklists for your target country.',
+    title: 'Visa Guidance',
+    description:
+      'Understand visa requirements, document needs, and relocation pathways using structured flows based on your target country.',
     icon: FileText,
-    time: '2–4 min',
-    color: 'bg-neutral-50 text-neutral-900 border-neutral-100',
-    hoverColor: 'hover:border-neutral-300 hover:shadow-neutral-100',
   },
-];
+] as const;
+
+const steps = [
+  {
+    title: 'Choose a search type',
+    body: 'Select whether you want to search for jobs, scholarships, or visa requirements.',
+  },
+  {
+    title: 'Add your criteria',
+    body: 'Provide your goals, qualifications, destination preferences, or relocation context through a guided flow.',
+  },
+  {
+    title: 'TinyFinder searches the web',
+    body: 'We scan relevant public sources and organize results into a cleaner, easier-to-review experience.',
+  },
+  {
+    title: 'Review and continue later',
+    body: 'Save searches, revisit results, and refine your criteria without starting from scratch.',
+  },
+] as const;
+
+const sourceTypes = [
+  'Job Boards',
+  'Career Pages',
+  'University Funding Pages',
+  'Scholarship Sources',
+  'Immigration Resources',
+] as const;
+
+const benefits = [
+  {
+    title: 'Less manual searching',
+    body: 'Avoid opening dozens of tabs just to compare opportunities.',
+  },
+  {
+    title: 'More structured discovery',
+    body: 'Use guided search flows instead of scattered browsing.',
+  },
+  {
+    title: 'Relevant opportunity matching',
+    body: 'Search around your goals, profile, destination, and preferences.',
+  },
+  {
+    title: 'Save and continue',
+    body: 'Keep searches organized so you can return later without re-entering everything.',
+  },
+] as const;
 
 export function LandingPage() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 
-  const handleStart = () => {
+  const handleStart = React.useCallback(() => {
     if (isAuthenticated) {
       navigate('/new-search');
       return;
     }
 
     navigate('/auth?next=%2Fnew-search');
-  };
+  }, [isAuthenticated, navigate]);
+
+  const handleSeeHowItWorks = React.useCallback(() => {
+    document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   return (
-    <div className="flex flex-col items-center justify-center py-12 text-center">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
+    <div className="space-y-8 py-4 md:space-y-10 md:py-8">
+      <motion.section
+        initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="max-w-2xl mb-12"
+        transition={{ duration: 0.35 }}
+        className="overflow-hidden rounded-[32px] border border-neutral-200 bg-white shadow-sm"
       >
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-100 text-neutral-900 text-xs font-semibold mb-6">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-neutral-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-neutral-500"></span>
-          </span>
-          AI-POWERED SEARCH WORKSPACE
-        </div>
-        <h1 className="text-[40px] font-bold tracking-tight leading-tight mb-4">
-          Find verified opportunities faster.
-        </h1>
-        <p className="text-lg text-neutral-500 max-w-lg mx-auto">
-          Use a guided search flow to set your goals, filters, and profile context before running a search. You now need an account before search can begin.
-        </p>
-      </motion.div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl mb-12">
-        {searchTypes.map((type, index) => (
-          <motion.div
-            key={type.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: index * 0.1 }}
-            className={`group relative flex flex-col items-start p-8 rounded-2xl border-2 text-left transition-all duration-300 bg-white border-neutral-100 ${type.hoverColor} hover:shadow-lg`}
-          >
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-6 transition-transform group-hover:scale-110 ${type.color}`}>
-              <type.icon size={24} />
+        <div className="grid gap-10 p-6 md:p-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:p-12">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-neutral-500">
+              <Search size={14} />
+              AI-powered opportunity search
             </div>
-            <h3 className="text-xl font-bold mb-2">{type.title}</h3>
-            <p className="text-sm text-neutral-500 leading-relaxed mb-6">
-              {type.description}
+            <h1 className="mt-5 text-[36px] font-bold tracking-tight text-neutral-950 md:text-[52px] md:leading-[1.02]">
+              Find jobs, scholarships, and visa pathways faster.
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-8 text-neutral-600 md:text-lg">
+              TinyFinder searches across job boards, scholarship sources, and official visa information pages to help
+              you discover relevant opportunities with less manual searching.
             </p>
-            <div className="mt-auto flex items-center gap-2 text-xs font-medium text-neutral-400">
-              <Clock size={14} />
-              Estimated time: {type.time}
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={handleStart}
+                className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-2xl bg-neutral-900 px-6 py-3 text-sm font-bold text-white transition-all hover:bg-black"
+              >
+                {isAuthenticated ? 'Start Searching' : 'Find Opportunities'}
+                <ArrowRight size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={handleSeeHowItWorks}
+                className="inline-flex min-h-[52px] items-center justify-center rounded-2xl border border-neutral-200 bg-white px-6 py-3 text-sm font-bold text-neutral-700 transition-all hover:border-neutral-300 hover:text-neutral-950"
+              >
+                See How It Works
+              </button>
             </div>
-          </motion.div>
-        ))}
-      </div>
 
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-        className="flex flex-col items-center gap-4 w-full max-w-xs md:max-w-none"
-      >
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-100">
-          <Sparkles size={12} />
-          Search now starts after sign-in or registration
+            <p className="mt-5 text-sm leading-7 text-neutral-500">
+              Search across job platforms, university funding pages, and official immigration resources.
+            </p>
+          </div>
+
+          <div className="rounded-[28px] bg-neutral-950 p-6 text-white md:p-8">
+            <p className="text-xs font-bold uppercase tracking-[0.26em] text-neutral-400">What TinyFinder searches</p>
+            <div className="mt-6 space-y-4">
+              {[
+                {
+                  title: 'Jobs',
+                  body: 'Major job boards and company career pages.',
+                },
+                {
+                  title: 'Scholarships',
+                  body: 'Scholarship sources, university funding pages, and study opportunities.',
+                },
+                {
+                  title: 'Visa pathways',
+                  body: 'Official immigration resources and country-specific requirement pages where applicable.',
+                },
+              ].map((item) => (
+                <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-sm font-bold text-white">{item.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-neutral-300">{item.body}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm font-bold text-white">Why it feels faster</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-neutral-400">
+                <span>Guided setup</span>
+                <span className="h-1 w-1 rounded-full bg-neutral-500" />
+                <span>Web search</span>
+                <span className="h-1 w-1 rounded-full bg-neutral-500" />
+                <span>Saved results</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <button
-          onClick={handleStart}
-          className="w-full md:w-auto px-10 py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 min-h-[56px] bg-neutral-900 text-white hover:bg-black shadow-xl shadow-neutral-200 active:scale-95"
-        >
-          {isAuthenticated ? 'Go to New Search' : 'Create Account to Start Search'}
-          <ArrowRight size={20} />
-        </button>
+      </motion.section>
 
-        {!isAuthenticated && (
+      <section className="rounded-[32px] border border-neutral-200 bg-white p-6 shadow-sm md:p-8 lg:p-10">
+        <div className="max-w-2xl">
+          <p className="text-xs font-bold uppercase tracking-[0.26em] text-neutral-400">Use cases</p>
+          <h2 className="mt-3 text-[30px] font-bold tracking-tight text-neutral-950 md:text-[38px]">
+            What TinyFinder helps you do
+          </h2>
+          <p className="mt-3 text-sm leading-7 text-neutral-500 md:text-base">
+            Start with the opportunity you care about most, then let TinyFinder organize the search around your goals.
+          </p>
+        </div>
+
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          {useCases.map((item, index) => (
+            <motion.div
+              key={item.id}
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25, delay: index * 0.05 }}
+              className="rounded-[28px] border border-neutral-200 bg-neutral-50/70 p-6"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-neutral-900 shadow-sm">
+                <item.icon size={22} />
+              </div>
+              <h3 className="mt-6 text-2xl font-bold tracking-tight text-neutral-950">{item.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-neutral-500">{item.description}</p>
+            </motion.div>
+          ))}
+        </div>
+      </section>
+
+      <section
+        id="how-it-works"
+        className="rounded-[32px] border border-neutral-200 bg-white p-6 shadow-sm md:p-8 lg:p-10"
+      >
+        <div className="max-w-2xl">
+          <p className="text-xs font-bold uppercase tracking-[0.26em] text-neutral-400">How it works</p>
+          <h2 className="mt-3 text-[30px] font-bold tracking-tight text-neutral-950 md:text-[38px]">
+            Search with a guided flow instead of scattered tabs
+          </h2>
+        </div>
+
+        <div className="mt-8 grid gap-4 lg:grid-cols-4">
+          {steps.map((step, index) => (
+            <div key={step.title} className="rounded-[28px] border border-neutral-200 bg-neutral-50/70 p-5">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-neutral-900 text-sm font-bold text-white">
+                {index + 1}
+              </div>
+              <h3 className="mt-5 text-xl font-bold tracking-tight text-neutral-950">{step.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-neutral-500">{step.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <div className="rounded-[32px] border border-neutral-200 bg-white p-6 shadow-sm md:p-8">
+          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-emerald-700">
+            <ShieldCheck size={14} />
+            Trust and sources
+          </div>
+          <h2 className="mt-4 text-[30px] font-bold tracking-tight text-neutral-950 md:text-[38px]">
+            Search across trusted public sources
+          </h2>
+          <p className="mt-4 text-sm leading-7 text-neutral-500 md:text-base">
+            TinyFinder helps reduce manual searching by organizing information from job sites, scholarship sources,
+            university pages, and official visa information resources into guided search flows.
+          </p>
+          <p className="mt-4 text-sm leading-7 text-neutral-500">
+            It is built to feel more like a focused opportunity search engine than a generic dashboard.
+          </p>
+        </div>
+
+        <div className="rounded-[32px] border border-neutral-200 bg-white p-6 shadow-sm md:p-8">
+          <p className="text-xs font-bold uppercase tracking-[0.26em] text-neutral-400">Source types</p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            {sourceTypes.map((item) => (
+              <span
+                key={item}
+                className="rounded-full border border-neutral-200 bg-neutral-50 px-4 py-2 text-sm font-medium text-neutral-700"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+
+          <div className="mt-8 grid gap-4 md:grid-cols-2">
+            {[
+              'Guided criteria before results',
+              'Clearer review experience',
+              'Searches saved for later',
+              'Structured next steps',
+            ].map((item) => (
+              <div key={item} className="flex items-start gap-3 rounded-2xl border border-neutral-200 bg-neutral-50/70 p-4">
+                <CheckCircle2 size={18} className="mt-0.5 text-emerald-600" />
+                <p className="text-sm font-medium text-neutral-700">{item}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-[32px] border border-neutral-200 bg-white p-6 shadow-sm md:p-8 lg:p-10">
+        <div className="max-w-2xl">
+          <p className="text-xs font-bold uppercase tracking-[0.26em] text-neutral-400">Benefits</p>
+          <h2 className="mt-3 text-[30px] font-bold tracking-tight text-neutral-950 md:text-[38px]">
+            Why use TinyFinder instead of searching manually
+          </h2>
+        </div>
+
+        <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          {benefits.map((item) => (
+            <div key={item.title} className="rounded-[28px] border border-neutral-200 bg-neutral-50/70 p-6">
+              <h3 className="text-xl font-bold tracking-tight text-neutral-950">{item.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-neutral-500">{item.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-[32px] border border-neutral-900 bg-neutral-950 p-6 text-white shadow-sm md:p-8 lg:p-10">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-xs font-bold uppercase tracking-[0.26em] text-neutral-500">Start now</p>
+            <h2 className="mt-3 text-[30px] font-bold tracking-tight md:text-[40px]">Ready to search smarter?</h2>
+            <p className="mt-4 text-sm leading-7 text-neutral-300 md:text-base">
+              Start with jobs, scholarships, or visa requirements in one guided workspace.
+            </p>
+          </div>
+
           <button
             type="button"
-            onClick={() => navigate('/auth?next=%2Fnew-search')}
-            className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors py-2 inline-flex items-center gap-2"
+            onClick={handleStart}
+            className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-2xl bg-white px-6 py-3 text-sm font-bold text-neutral-950 transition-all hover:bg-neutral-100"
           >
-            <LogIn size={16} />
-            Sign in to continue
+            {isAuthenticated ? 'Start Your Search' : 'Create Account and Begin'}
+            <ArrowRight size={18} />
           </button>
-        )}
-      </motion.div>
-      
-      <div className="mt-24 grid grid-cols-2 md:grid-cols-4 gap-12 opacity-30 grayscale">
-        <div className="flex items-center justify-center font-bold text-xl tracking-tighter">TECHCORP</div>
-        <div className="flex items-center justify-center font-bold text-xl tracking-tighter">GLOBALEDU</div>
-        <div className="flex items-center justify-center font-bold text-xl tracking-tighter">VISAFIRST</div>
-        <div className="flex items-center justify-center font-bold text-xl tracking-tighter">JOBSTREAM</div>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }

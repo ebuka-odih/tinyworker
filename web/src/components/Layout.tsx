@@ -10,7 +10,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { authUser, isAuthenticated, signOut } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const authNext = encodeURIComponent('/new-search');
-  const isNewSearchRoute = location.pathname.startsWith('/new-search') || location.pathname.startsWith('/intake/');
+  const isSearchWorkspaceRoute = location.pathname.startsWith('/new-search') || location.pathname.startsWith('/intake/');
   
   const handleSignOut = () => {
     signOut();
@@ -35,9 +35,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <>
                 <Link 
                   to="/new-search"
-                  className={`text-sm font-medium transition-colors hover:text-neutral-900 ${isNewSearchRoute ? 'text-neutral-900' : 'text-neutral-500'}`}
+                  className={`text-sm font-medium transition-colors hover:text-neutral-900 ${isSearchWorkspaceRoute ? 'text-neutral-900' : 'text-neutral-500'}`}
                 >
-                  New Search
+                  Search Workspace
                 </Link>
                 <Link
                   to="/profile"
@@ -91,9 +91,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <Link 
                   to="/new-search"
                   onClick={() => setIsMenuOpen(false)}
-                  className={`block text-lg font-bold p-2 rounded-xl ${isNewSearchRoute ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'}`}
+                  className={`block text-lg font-bold p-2 rounded-xl ${isSearchWorkspaceRoute ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'}`}
                 >
-                  New Search
+                  Search Workspace
                 </Link>
                 <Link 
                   to="/profile"

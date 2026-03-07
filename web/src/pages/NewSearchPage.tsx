@@ -13,22 +13,31 @@ const searchTypeCards = [
   {
     type: SearchType.JOB,
     title: 'Jobs',
-    description: 'Run a live job search with ranking, source coverage, and saved results.',
-    meta: 'Live search',
+    description:
+      'Search across major job boards and company career pages for roles that match your skills, experience, and target country.',
+    meta: 'Guided setup • Estimated time: 2–5 min',
+    badge: 'Live results',
+    cta: 'Start job search',
     icon: Briefcase,
   },
   {
     type: SearchType.SCHOLARSHIP,
     title: 'Scholarships',
-    description: 'Build a structured scholarship search profile with funding and destination preferences.',
-    meta: 'Criteria flow',
+    description:
+      'Search scholarship sources, university funding pages, and academic opportunity listings based on your study goals and destination preferences.',
+    meta: 'Guided setup • Estimated time: 3–6 min',
+    badge: 'Structured flow',
+    cta: 'Start scholarship search',
     icon: GraduationCap,
   },
   {
     type: SearchType.VISA,
     title: 'Visa Requirements',
-    description: 'Capture your target country, visa path, and travel context in a guided checklist flow.',
-    meta: 'Criteria flow',
+    description:
+      'Review visa pathways, required documents, and country-specific requirements through a guided relocation checklist.',
+    meta: 'Guided setup • Estimated time: 2–4 min',
+    badge: 'Structured flow',
+    cta: 'Check visa path',
     icon: FileText,
   },
 ] as const;
@@ -63,20 +72,12 @@ function getRecentSearchTitle(recent: RecentSearchSummary): string {
 
 function getRecentSearchSubtitle(recent: RecentSearchSummary): string {
   if (recent.type === SearchType.SCHOLARSHIP) {
-    return [
-      recent.formData.destinationRegion,
-      recent.formData.studyLevel,
-      recent.formData.fundingType,
-    ]
+    return [recent.formData.destinationRegion, recent.formData.studyLevel, recent.formData.fundingType]
       .filter(Boolean)
       .join(' • ') || 'Scholarship criteria';
   }
   if (recent.type === SearchType.VISA) {
-    return [
-      recent.formData.visaCategory,
-      recent.formData.nationality,
-      recent.formData.currentResidence,
-    ]
+    return [recent.formData.visaCategory, recent.formData.nationality, recent.formData.currentResidence]
       .filter(Boolean)
       .join(' • ') || 'Visa criteria';
   }
@@ -90,7 +91,7 @@ function getRecentSearchSubtitle(recent: RecentSearchSummary): string {
 }
 
 function renderRecentActionLabel(recent: RecentSearchSummary): string {
-  return recent.type === SearchType.JOB ? 'Open results' : 'Open form';
+  return recent.type === SearchType.JOB ? 'Open results' : 'Continue setup';
 }
 
 export function NewSearchPage() {
@@ -132,22 +133,28 @@ export function NewSearchPage() {
 
   return (
     <div className="space-y-8 py-4 md:py-8">
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-100 p-5 md:p-8">
+      <div className="rounded-[32px] border border-neutral-200 bg-white p-5 shadow-sm md:p-8">
         <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-          <div className="max-w-2xl">
+          <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-neutral-500">
               <Layers3 size={14} />
-              Search workspace
+              AI-powered search workspace
             </div>
-            <h1 className="mt-4 text-[30px] font-bold tracking-tight text-neutral-950 md:text-[40px]">Start a new search or reopen a saved one.</h1>
-            <p className="mt-3 max-w-xl text-sm leading-7 text-neutral-500 md:text-base">
-              Pick the search type first, then follow the guided form for that flow. Recent searches stay separate so users can jump back in without re-entering criteria.
+            <h1 className="mt-4 text-[30px] font-bold tracking-tight text-neutral-950 md:text-[40px]">
+              Choose what you want to search for
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-neutral-500 md:text-base">
+              TinyFinder helps you search jobs, scholarships, and visa requirements through guided flows that organize
+              your criteria before scanning relevant public sources.
+            </p>
+            <p className="mt-4 text-sm leading-7 text-neutral-500">
+              Select a search flow to help TinyFinder understand your goals before gathering results.
             </p>
           </div>
 
           <div className="inline-flex w-full rounded-2xl bg-neutral-100 p-1 md:w-auto">
             {[
-              { id: 'new' as const, label: 'New Search' },
+              { id: 'new' as const, label: 'Search Flows' },
               { id: 'recent' as const, label: 'Recent Searches' },
             ].map((tab) => (
               <button
@@ -166,48 +173,59 @@ export function NewSearchPage() {
       </div>
 
       {activeTab === 'new' ? (
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-          {searchTypeCards.map((card, index) => (
-            <motion.button
-              key={card.type}
-              type="button"
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.22, delay: index * 0.05 }}
-              onClick={() => navigate(`/intake/${card.type}`)}
-              className="group rounded-2xl border border-neutral-200 bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-neutral-300 hover:shadow-md"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-900">
-                  <card.icon size={22} />
+        <>
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-sm">
+            Jobs can run live now. Scholarship and visa flows start with structured criteria you can save, refine, and
+            reuse.
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+            {searchTypeCards.map((card, index) => (
+              <motion.button
+                key={card.type}
+                type="button"
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.22, delay: index * 0.05 }}
+                onClick={() => navigate(`/intake/${card.type}`)}
+                className="group rounded-[28px] border border-neutral-200 bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-neutral-300 hover:shadow-md"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-900">
+                    <card.icon size={22} />
+                  </div>
+                  <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500">
+                    {card.badge}
+                  </span>
                 </div>
-                <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500">
+
+                <h2 className="mt-6 text-2xl font-bold tracking-tight text-neutral-950">{card.title}</h2>
+                <p className="mt-3 text-sm leading-7 text-neutral-500">{card.description}</p>
+
+                <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-neutral-50 px-3 py-1 text-[11px] font-bold text-neutral-500">
+                  <Clock3 size={14} />
                   {card.meta}
-                </span>
-              </div>
+                </div>
 
-              <h2 className="mt-6 text-2xl font-bold tracking-tight text-neutral-950">{card.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-neutral-500">{card.description}</p>
-
-              <div className="mt-8 flex items-center justify-between border-t border-neutral-100 pt-5 text-sm font-bold text-neutral-900">
-                <span className="inline-flex items-center gap-2 text-neutral-500">
-                  <Clock3 size={16} />
-                  Guided intake
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  Open flow
-                  <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" />
-                </span>
-              </div>
-            </motion.button>
-          ))}
-        </div>
+                <div className="mt-8 flex items-center justify-between border-t border-neutral-100 pt-5 text-sm font-bold text-neutral-900">
+                  <span className="text-neutral-500">Guided flow</span>
+                  <span className="inline-flex items-center gap-2">
+                    {card.cta}
+                    <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" />
+                  </span>
+                </div>
+              </motion.button>
+            ))}
+          </div>
+        </>
       ) : (
-        <div className="rounded-2xl border border-neutral-100 bg-white p-5 shadow-sm md:p-6">
+        <div className="rounded-[32px] border border-neutral-100 bg-white p-5 shadow-sm md:p-6">
           <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-bold text-neutral-900">Recent Searches</h2>
-              <p className="text-sm text-neutral-500">Open past results or reuse previous criteria as the base for a new run.</p>
+              <h2 className="text-lg font-bold text-neutral-900">Saved search setups and results</h2>
+              <p className="text-sm text-neutral-500">
+                Reopen live job results or reuse saved scholarship and visa criteria without starting from scratch.
+              </p>
             </div>
             <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">{recentSearches.length} saved</span>
           </div>
@@ -219,14 +237,15 @@ export function NewSearchPage() {
               </div>
               <h3 className="mt-4 text-lg font-bold text-neutral-900">No recent searches yet</h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-7 text-neutral-500">
-                Start a new job, scholarship, or visa search. Once you complete a flow, it will appear here for quick reuse.
+                Start a job, scholarship, or visa search flow. Once you complete a setup or run, it will appear here
+                for quick reuse.
               </p>
               <button
                 type="button"
                 onClick={() => setActiveTab('new')}
                 className="mt-5 min-h-[44px] rounded-xl bg-neutral-900 px-5 py-3 text-sm font-bold text-white transition-all hover:bg-black"
               >
-                Start new search
+                Start Search Setup
               </button>
             </div>
           ) : (
