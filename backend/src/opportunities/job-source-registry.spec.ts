@@ -2,6 +2,7 @@ import {
   getActiveDiscoveryDomains,
   getAllowedDomains,
   getCuratedSourceProfiles,
+  isCuratedJobSourceDomain,
   isHeavyJobSiteDomain,
 } from './job-source-registry'
 
@@ -11,11 +12,37 @@ describe('job source registry', () => {
     const activeDiscoveryDomains = getActiveDiscoveryDomains('global')
 
     expect(allowedDomains).toEqual(
-      expect.arrayContaining(['linkedin.com', 'indeed.com', 'glassdoor.com', 'boards.greenhouse.io', 'jobs.lever.co', 'ashbyhq.com', 'djinni.co']),
+      expect.arrayContaining([
+        'weworkremotely.com',
+        'remotive.com',
+        'remote.co',
+        'remoteok.com',
+        'justremote.co',
+        'workingnomads.com',
+        'jobspresso.co',
+        'dailyremote.com',
+        'remoteafrica.io',
+        'linkedin.com',
+        'indeed.com',
+        'glassdoor.com',
+        'boards.greenhouse.io',
+        'jobs.lever.co',
+        'ashbyhq.com',
+        'djinni.co',
+      ]),
     )
 
     expect(activeDiscoveryDomains).toEqual(
       expect.arrayContaining([
+        'weworkremotely.com',
+        'remotive.com',
+        'remote.co',
+        'remoteok.com',
+        'justremote.co',
+        'workingnomads.com',
+        'jobspresso.co',
+        'dailyremote.com',
+        'remoteafrica.io',
         'linkedin.com',
         'indeed.com',
         'glassdoor.com',
@@ -38,6 +65,17 @@ describe('job source registry', () => {
     expect(isHeavyJobSiteDomain('jobs.lever.co')).toBe(false)
   })
 
+  it('identifies curated job-source domains for the default search mode', () => {
+    expect(isCuratedJobSourceDomain('weworkremotely.com')).toBe(true)
+    expect(isCuratedJobSourceDomain('remotive.com')).toBe(true)
+    expect(isCuratedJobSourceDomain('remote.co')).toBe(true)
+    expect(isCuratedJobSourceDomain('remoteafrica.io')).toBe(true)
+    expect(isCuratedJobSourceDomain('boards.greenhouse.io')).toBe(false)
+    expect(isCuratedJobSourceDomain('jobs.lever.co')).toBe(false)
+    expect(isCuratedJobSourceDomain('linkedin.com')).toBe(false)
+    expect(isCuratedJobSourceDomain('indeed.com')).toBe(false)
+  })
+
   it('exposes curated-source metadata without shrinking the current source set', () => {
     const curated = getCuratedSourceProfiles('global')
     const allowedDomains = getAllowedDomains('global', 'curated')
@@ -46,22 +84,46 @@ describe('job source registry', () => {
     expect(curated).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: 'greenhouse',
-          queueTier: 'fast',
-          preferredMode: 'ats_direct',
-          trustScore: 10,
-        }),
-        expect.objectContaining({
-          id: 'djinni',
+          id: 'weworkremotely',
           queueTier: 'fast',
           preferredMode: 'search_page',
-          searchUrlTemplate: expect.stringContaining('djinni.co/jobs'),
+          trustScore: 9,
+        }),
+        expect.objectContaining({
+          id: 'remoteafrica',
+          queueTier: 'fast',
+          preferredMode: 'search_page',
+          searchUrlTemplate: expect.stringContaining('remoteafrica.io/jobs'),
         }),
       ]),
     )
 
-    expect(allowedDomains).toEqual(expect.arrayContaining(['boards.greenhouse.io', 'jobs.lever.co', 'ashbyhq.com', 'djinni.co']))
-    expect(allowedDomains).not.toEqual(expect.arrayContaining(['linkedin.com', 'indeed.com', 'glassdoor.com']))
-    expect(activeDiscoveryDomains).toEqual(expect.arrayContaining(['greenhouse.io', 'jobs.lever.co', 'ashbyhq.com', 'djinni.co']))
+    expect(allowedDomains).toEqual(
+      expect.arrayContaining([
+        'weworkremotely.com',
+        'remotive.com',
+        'remote.co',
+        'remoteok.com',
+        'justremote.co',
+        'workingnomads.com',
+        'jobspresso.co',
+        'dailyremote.com',
+        'remoteafrica.io',
+      ]),
+    )
+    expect(allowedDomains).not.toEqual(expect.arrayContaining(['linkedin.com', 'indeed.com', 'glassdoor.com', 'boards.greenhouse.io']))
+    expect(activeDiscoveryDomains).toEqual(
+      expect.arrayContaining([
+        'weworkremotely.com',
+        'remotive.com',
+        'remote.co',
+        'remoteok.com',
+        'justremote.co',
+        'workingnomads.com',
+        'jobspresso.co',
+        'dailyremote.com',
+        'remoteafrica.io',
+      ]),
+    )
   })
 })

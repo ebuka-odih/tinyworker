@@ -24,6 +24,36 @@ type ValyuSearchResponse = {
   results?: ValyuSearchResult[]
 }
 
+type ValyuContentsSummaryEnvelope = {
+  summary?: unknown
+  result?: unknown
+  data?: unknown
+  output?: unknown
+}
+
+type ValyuContentsResult = {
+  url?: string
+  title?: string
+  content?: string
+  markdown?: string
+  text?: string
+  publication_date?: string
+  published_at?: string
+  summary?: unknown
+  result?: unknown
+  data?: unknown
+  output?: unknown
+}
+
+type ValyuContentsResponse = {
+  results?: ValyuContentsResult[]
+  contents?: ValyuContentsResult[]
+  data?: {
+    results?: ValyuContentsResult[]
+    contents?: ValyuContentsResult[]
+  }
+}
+
 type JobSearchInput = {
   query: string
   countryCode?: string
@@ -66,10 +96,28 @@ export type ValyuDiscoveredScholarshipCandidate = {
   sourceVerified: boolean
 }
 
+export type ValyuExtractedJobContent = {
+  title?: string
+  company?: string
+  location?: string
+  salary?: string
+  employment_type?: string
+  work_mode?: string
+  posted_date?: string
+  match_reason?: string
+  requirements?: string[]
+  responsibilities?: string[]
+  benefits?: string[]
+  snippet?: string
+  summary?: string
+}
+
 @Injectable()
 export class ValyuSearchService {
   private readonly apiUrl = process.env.VALYU_API_URL || 'https://api.valyu.ai/v1/search'
+  private readonly contentsApiUrl = process.env.VALYU_CONTENTS_API_URL || 'https://api.valyu.ai/v1/contents'
   private readonly timeoutMs = Number(process.env.VALYU_API_TIMEOUT_MS || 20000)
+  private readonly contentsTimeoutMs = Number(process.env.VALYU_CONTENTS_TIMEOUT_MS || Math.max(this.timeoutMs, 25000))
   private readonly maxAgeDays = Math.max(1, Number(process.env.JOB_SEARCH_MAX_AGE_DAYS || 21))
 
   async discoverJobCandidates(input: JobSearchInput): Promise<ValyuDiscoveredCandidate[]> {
@@ -203,6 +251,61 @@ export class ValyuSearchService {
     }) as ValyuDiscoveredScholarshipCandidate[]
   }
 
+  async extractJobPageContent(url: string, query: string): Promise<ValyuExtractedJobContent | null> {
+    const apiKey = process.env.VALYU_API_KEY
+    if (!apiKey) {
+      throw new ServiceUnavailableException('VALYU_API_KEY is not configured')
+    }
+
+    const results = await this.executeValyuContents(apiKey, {
+      urls: [url],
+      extract_effort: 'high',
+      include_images: false,
+      response_length: 'short',
+      summary: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'job_listing',
+          schema: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Job title from the page.' },
+              company: { type: 'string', description: 'Company or employer name.' },
+              location: { type: 'string', description: 'Job location or region.' },
+              salary: { type: 'string', description: 'Compensation details if available.' },
+              employment_type: { type: 'string', description: 'Employment type such as full-time or contract.' },
+              work_mode: { type: 'string', description: 'Remote, hybrid, onsite, or distributed.' },
+              posted_date: { type: 'string', description: 'Posting date or relative recency if shown.' },
+              match_reason: { type: 'string', description: `Briefly explain how this role matches the query: ${query}.` },
+              summary: { type: 'string', description: 'Short summary of the role.' },
+              snippet: { type: 'string', description: 'One concise snippet from the listing.' },
+              requirements: { type: 'array', items: { type: 'string' } },
+              responsibilities: { type: 'array', items: { type: 'string' } },
+              benefits: { type: 'array', items: { type: 'string' } },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+    })
+
+    const first = results[0]
+    if (!first) return null
+
+    const structured = this.pickStructuredJobContent(first.summary ?? first.result ?? first.data ?? first.output)
+    if (structured) {
+      return structured
+    }
+
+    const fallbackSnippet = this.safeText(first.content || first.markdown || first.text)
+    return {
+      title: this.safeText(first.title),
+      posted_date: this.safeText(first.publication_date || first.published_at),
+      summary: fallbackSnippet.slice(0, 600) || undefined,
+      snippet: fallbackSnippet.slice(0, 280) || undefined,
+    }
+  }
+
   private buildQueryVariants(input: JobSearchInput): string[] {
     const original = String(input.query || '').trim()
     const normalized = normalizeDiscoveryQuery(original)
@@ -213,6 +316,33 @@ export class ValyuSearchService {
 
     const base = normalized || original
     if (base) {
+      if (this.hasSource(input.includedSources, 'weworkremotely.com')) {
+        variants.add(`site:weworkremotely.com/remote-jobs ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'remotive.com')) {
+        variants.add(`site:remotive.com/remote-jobs ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'remote.co')) {
+        variants.add(`site:remote.co/remote-jobs ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'remoteok.com')) {
+        variants.add(`site:remoteok.com ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'justremote.co')) {
+        variants.add(`site:justremote.co/remote-jobs ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'workingnomads.com')) {
+        variants.add(`site:workingnomads.com/jobs ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'jobspresso.co')) {
+        variants.add(`site:jobspresso.co/remote-work ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'dailyremote.com')) {
+        variants.add(`site:dailyremote.com/remote-jobs ${base}`)
+      }
+      if (this.hasSource(input.includedSources, 'remoteafrica.io')) {
+        variants.add(`site:remoteafrica.io/jobs ${base}`)
+      }
       if (this.hasSource(input.includedSources, 'linkedin.com')) {
         variants.add(`site:linkedin.com/jobs/view ${base}`)
       }
@@ -325,5 +455,103 @@ export class ValyuSearchService {
 
     const payload = (await response.json()) as ValyuSearchResponse
     return Array.isArray(payload.results) ? payload.results : []
+  }
+
+  private async executeValyuContents(apiKey: string, body: Record<string, unknown>): Promise<ValyuContentsResult[]> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), this.contentsTimeoutMs)
+
+    let response: Response
+    try {
+      response = await fetch(this.contentsApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new ServiceUnavailableException(`Valyu contents extraction timed out after ${this.contentsTimeoutMs}ms`)
+      }
+
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      throw new ServiceUnavailableException(`Valyu contents request failed: ${message}`)
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    if (!response.ok) {
+      const errorBody = await response.text()
+      throw new ServiceUnavailableException(`Valyu contents extraction failed (${response.status}): ${errorBody}`)
+    }
+
+    const payload = (await response.json()) as ValyuContentsResponse
+    if (Array.isArray(payload.results)) return payload.results
+    if (Array.isArray(payload.contents)) return payload.contents
+    if (Array.isArray(payload.data?.results)) return payload.data.results
+    if (Array.isArray(payload.data?.contents)) return payload.data.contents
+    return []
+  }
+
+  private pickStructuredJobContent(input: unknown): ValyuExtractedJobContent | null {
+    if (!input) return null
+    if (typeof input === 'string') {
+      try {
+        return this.pickStructuredJobContent(JSON.parse(input))
+      } catch {
+        return null
+      }
+    }
+    if (Array.isArray(input)) {
+      for (const item of input) {
+        const parsed = this.pickStructuredJobContent(item)
+        if (parsed) return parsed
+      }
+      return null
+    }
+    if (typeof input !== 'object') return null
+
+    const record = input as ValyuExtractedJobContent & ValyuContentsSummaryEnvelope
+    const hasSignals = ['title', 'company', 'location', 'salary', 'summary', 'snippet', 'requirements'].some((key) => key in record)
+    if (hasSignals) {
+      return {
+        title: this.safeText(record.title),
+        company: this.safeText(record.company),
+        location: this.safeText(record.location),
+        salary: this.safeText(record.salary),
+        employment_type: this.safeText(record.employment_type),
+        work_mode: this.safeText(record.work_mode),
+        posted_date: this.safeText(record.posted_date),
+        match_reason: this.safeText(record.match_reason),
+        summary: this.safeText(record.summary),
+        snippet: this.safeText(record.snippet),
+        requirements: this.safeList(record.requirements),
+        responsibilities: this.safeList(record.responsibilities),
+        benefits: this.safeList(record.benefits),
+      }
+    }
+
+    return (
+      this.pickStructuredJobContent(record.summary) ||
+      this.pickStructuredJobContent(record.result) ||
+      this.pickStructuredJobContent(record.data) ||
+      this.pickStructuredJobContent(record.output)
+    )
+  }
+
+  private safeText(value: unknown): string {
+    if (typeof value === 'string') return value.trim()
+    return ''
+  }
+
+  private safeList(value: unknown): string[] {
+    if (!Array.isArray(value)) return []
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean)
+      .slice(0, 10)
   }
 }

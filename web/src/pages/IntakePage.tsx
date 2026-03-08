@@ -147,20 +147,20 @@ const jobSearchModeCards: Array<{
   icon: React.ComponentType<{ size?: number }>;
 }> = [
   {
-    value: 'classic',
-    title: 'Wide Search',
-    description: 'Covers the broader job web first, then ranks the best current matches back to you.',
-    summary: 'Higher coverage across broad boards and direct ATS sources.',
-    sources: ['LinkedIn Jobs', 'Indeed', 'Glassdoor', 'Greenhouse', 'Lever', 'Ashby'],
-    icon: Globe,
+    value: 'curated',
+    title: 'Default Search',
+    description: 'Recommended for most users. It keeps the search tighter so the results are easier to review.',
+    summary: 'Cleaner results with a more focused source set.',
+    sources: ['We Work Remotely', 'Remotive', 'Remote.co', 'Remote OK', 'JustRemote', 'Working Nomads', 'Jobspresso', 'DailyRemote', 'RemoteAfrica'],
+    icon: Sparkles,
   },
   {
-    value: 'curated',
-    title: 'Concise Search',
-    description: 'Focuses on cleaner, higher-signal sources so results are tighter and easier to review.',
-    summary: 'Narrower scan across direct ATS and focused boards.',
-    sources: ['Greenhouse', 'Lever', 'Ashby', 'Djinni'],
-    icon: Sparkles,
+    value: 'classic',
+    title: 'Wide Search',
+    description: 'Broader coverage with more volume. This can surface more listings, but may include more overlap.',
+    summary: 'More coverage across broad boards and direct ATS sources.',
+    sources: ['LinkedIn Jobs', 'Indeed', 'Glassdoor', 'Greenhouse', 'Lever', 'Ashby'],
+    icon: Globe,
   },
 ];
 
@@ -206,7 +206,7 @@ function getSearchTypeLabel(type: SearchOptionId): string {
 }
 
 function getJobSearchModeLabel(mode: JobSearchMode): string {
-  return mode === 'curated' ? 'Concise Search' : 'Wide Search';
+  return mode === 'curated' ? 'Default Search' : 'Wide Search';
 }
 
 function buildIntakeFormData(searchType: SearchOptionId, prefill?: SearchIntakeData): IntakeFormData {
@@ -1245,7 +1245,7 @@ export function IntakePage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-[28px] font-bold mb-2">Choose how to run this search</h2>
-              <p className="text-neutral-500 mb-8">Pick the search mode that best fits the tradeoff you want between breadth and signal quality.</p>
+              <p className="text-neutral-500 mb-8">Pick the search mode that best fits the tradeoff you want between cleaner signal and broader coverage.</p>
 
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 {jobSearchModeCards.map((modeCard) => {
@@ -1269,6 +1269,11 @@ export function IntakePage() {
                         {active && (
                           <span className="inline-flex rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white">
                             Selected
+                          </span>
+                        )}
+                        {!active && modeCard.value === 'curated' && (
+                          <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-700">
+                            Recommended
                           </span>
                         )}
                       </div>
@@ -1306,7 +1311,7 @@ export function IntakePage() {
 
               <div className="mt-6 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
                 {formData.searchMode === 'curated'
-                  ? 'Concise Search starts with a tighter set of higher-signal sources, so the session stays more focused.'
+                  ? 'Default Search starts with the cleaner, more focused path so the shortlist stays easier to review.'
                   : 'Wide Search keeps the broader source net to maximize coverage before ranking narrows the results.'}
               </div>
             </div>

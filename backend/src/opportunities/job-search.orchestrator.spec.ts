@@ -444,3 +444,85 @@ describe('JobSearchOrchestrator heavy-site extraction', () => {
     )
   })
 })
+
+describe('JobSearchOrchestrator default-search Valyu content extraction', () => {
+  afterEach(() => {
+    jest.resetModules()
+    jest.clearAllMocks()
+  })
+
+  it('uses Valyu page-content extraction for curated/default search sources before TinyFish fallback', async () => {
+    const tinyfish = {
+      runTinyfishWithFallback: jest.fn(),
+    }
+    jest.doMock('../tinyfish/tinyfish.client', () => tinyfish)
+
+    const { JobSearchOrchestrator } = require('./job-search.orchestrator')
+
+    const prisma = {
+      jobQueryCache: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+      },
+      jobExtractionCache: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+      },
+    }
+
+    const valyuSearch = {
+      discoverJobCandidates: jest.fn().mockResolvedValue([
+        {
+          id: 'candidate-1',
+          title: 'Senior Backend Engineer',
+          url: 'https://weworkremotely.com/remote-jobs/acme-senior-backend-engineer',
+          snippet: 'Build backend systems.',
+          relevance: 0.9,
+          sourceName: 'We Work Remotely',
+          sourceDomain: 'weworkremotely.com',
+          sourceType: 'job_board',
+          sourceVerified: true,
+        },
+      ]),
+      extractJobPageContent: jest.fn().mockResolvedValue({
+        title: 'Senior Backend Engineer',
+        company: 'Acme',
+        location: 'Remote',
+        summary: 'Build backend systems for a distributed team.',
+        posted_date: new Date().toISOString().slice(0, 10),
+      }),
+    }
+
+    const runStore = {
+      createRun: jest.fn().mockResolvedValue({ runId: 'run-1' }),
+      findActiveRunByIntentHash: jest.fn().mockReturnValue(null),
+      upsertResult: jest.fn().mockImplementation(async (_runId, result) => result),
+      appendEvent: jest.fn().mockResolvedValue(null),
+      setStatus: jest.fn().mockResolvedValue(undefined),
+      setCacheState: jest.fn().mockResolvedValue(undefined),
+      isStopRequested: jest.fn().mockReturnValue(false),
+      requestStop: jest.fn().mockReturnValue(true),
+      getSnapshot: jest.fn(),
+      getEventsSince: jest.fn(),
+    }
+
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    await orchestrator.startRun({
+      query: 'backend engineer',
+      maxNumResults: 1,
+      sourceScope: 'global',
+      userId: 'user-1',
+      mode: 'curated',
+    })
+
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(valyuSearch.extractJobPageContent).toHaveBeenCalledWith(
+      'https://weworkremotely.com/remote-jobs/acme-senior-backend-engineer',
+      'backend engineer',
+    )
+    expect(tinyfish.runTinyfishWithFallback).not.toHaveBeenCalled()
+  })
+})

@@ -16,7 +16,7 @@ import {
   sliceCachedReadyResults,
 } from './job-search-cache.utils'
 import { type JobSearchMode, resolveJobSearchMode } from './job-search-mode'
-import { getActiveDiscoveryDomains, isHeavyJobSiteDomain, JobSourceScope } from './job-source-registry'
+import { getActiveDiscoveryDomains, isCuratedJobSourceDomain, isHeavyJobSiteDomain, JobSourceScope } from './job-source-registry'
 import {
   JobSearchRunStore,
   SearchRunCacheState,
@@ -386,7 +386,20 @@ export class JobSearchOrchestrator {
       return this.buildReadyItem(base, payload)
     }
 
-    const extracted = await this.extractViaTinyfish(canonicalUrl, input.query, base.sourceDomain)
+    let extracted: TinyfishExtractedRecord | null = null
+
+    if (input.mode === 'curated' && isCuratedJobSourceDomain(base.sourceDomain)) {
+      try {
+        extracted = (await this.valyuSearch.extractJobPageContent(canonicalUrl, input.query)) as TinyfishExtractedRecord | null
+      } catch {
+        extracted = null
+      }
+    }
+
+    if (!this.hasUsableExtractedPayload(extracted)) {
+      extracted = await this.extractViaTinyfish(canonicalUrl, input.query, base.sourceDomain)
+    }
+
     await this.prisma.jobExtractionCache.upsert({
       where: { canonicalUrlHash: urlHash },
       update: {
@@ -407,6 +420,18 @@ export class JobSearchOrchestrator {
     })
 
     return this.buildReadyItem(base, extracted)
+  }
+
+  private hasUsableExtractedPayload(payload: TinyfishExtractedRecord | null | undefined): payload is TinyfishExtractedRecord {
+    if (!payload) return false
+
+    return Boolean(
+      this.safeText(payload.title) ||
+        this.safeText(payload.summary) ||
+        this.safeText(payload.snippet) ||
+        this.safeText(payload.location) ||
+        this.safeList(payload.requirements).length,
+    )
   }
 
   private async extractViaTinyfish(url: string, query: string, sourceDomain: string): Promise<TinyfishExtractedRecord> {

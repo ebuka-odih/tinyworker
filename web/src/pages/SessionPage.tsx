@@ -66,7 +66,65 @@ const COUNTRY_CODES: Record<string, string> = {
 const SNAPSHOT_POLL_INTERVAL_MS = 5_000;
 type SidebarTab = 'filters' | 'sources';
 type SourcePanelStatus = 'Completed' | 'Searching' | 'Failed' | 'Queued' | 'Included';
+const DEFAULT_SOURCE_CATALOG = [
+  {
+    name: 'We Work Remotely',
+    domain: 'weworkremotely.com',
+    summary: 'Focused remote board with direct application paths.',
+    emphasis: 'Remote-first',
+  },
+  {
+    name: 'Remotive',
+    domain: 'remotive.com',
+    summary: 'Remote job board with consistent current-role coverage.',
+    emphasis: 'Remote-first',
+  },
+  {
+    name: 'Remote.co',
+    domain: 'remote.co',
+    summary: 'Curated remote listings from distributed employers.',
+    emphasis: 'Curated board',
+  },
+  {
+    name: 'Remote OK',
+    domain: 'remoteok.com',
+    summary: 'Fast-moving remote listings across technical roles.',
+    emphasis: 'Remote volume',
+  },
+  {
+    name: 'JustRemote',
+    domain: 'justremote.co',
+    summary: 'Clean remote board focused on current openings.',
+    emphasis: 'Focused board',
+  },
+  {
+    name: 'Working Nomads',
+    domain: 'workingnomads.com',
+    summary: 'Remote board with strong async and distributed roles.',
+    emphasis: 'Distributed work',
+  },
+  {
+    name: 'Jobspresso',
+    domain: 'jobspresso.co',
+    summary: 'Remote-first board with curated white-collar roles.',
+    emphasis: 'Curated remote',
+  },
+  {
+    name: 'DailyRemote',
+    domain: 'dailyremote.com',
+    summary: 'Broader remote board that still stays easier to review.',
+    emphasis: 'Remote coverage',
+  },
+  {
+    name: 'RemoteAfrica',
+    domain: 'remoteafrica.io',
+    summary: 'Regional remote board with stronger African relevance.',
+    emphasis: 'Regional remote',
+  },
+] as const;
+
 const WIDE_SOURCE_CATALOG = [
+  ...DEFAULT_SOURCE_CATALOG,
   {
     name: 'LinkedIn Jobs',
     domain: 'linkedin.com/jobs',
@@ -103,15 +161,6 @@ const WIDE_SOURCE_CATALOG = [
     summary: 'Fast-moving startup and growth-company hiring.',
     emphasis: 'Startup ATS',
   },
-  {
-    name: 'Djinni',
-    domain: 'djinni.co',
-    summary: 'Developer-friendly board with strong European overlap.',
-    emphasis: 'Regional quality',
-  },
-] as const;
-
-const CONCISE_SOURCE_CATALOG = [
   {
     name: 'Greenhouse',
     domain: 'boards.greenhouse.io',
@@ -350,7 +399,7 @@ function resolveJobSearchMode(formData: JobSearchIntakeData | null | undefined):
 }
 
 function getJobSearchModeLabel(mode: JobSearchMode) {
-  return mode === 'curated' ? 'Concise Search' : 'Wide Search';
+  return mode === 'curated' ? 'Default Search' : 'Wide Search';
 }
 
 function planLabel(tier: 'free' | 'pro' | 'team') {
@@ -1454,9 +1503,9 @@ export function SessionPage() {
       }
       if (selectedJobSearchMode === 'curated') {
         return [
-          { name: 'Greenhouse', status: isSearching ? 'Searching' : 'Completed' },
-          { name: 'Lever', status: isSearching ? 'Searching' : 'Completed' },
-          { name: 'Ashby', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'We Work Remotely', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'Remotive', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'Remote.co', status: isSearching ? 'Searching' : 'Completed' },
         ];
       }
       return [
@@ -1474,7 +1523,7 @@ export function SessionPage() {
       sessionType === SearchType.SCHOLARSHIP
         ? SCHOLARSHIP_SOURCE_CATALOG
         : selectedJobSearchMode === 'curated'
-        ? CONCISE_SOURCE_CATALOG
+        ? DEFAULT_SOURCE_CATALOG
         : WIDE_SOURCE_CATALOG;
     return catalog.map((source, index) => ({
       ...source,
@@ -1631,7 +1680,7 @@ export function SessionPage() {
                         <p className="text-sm text-neutral-500">This run stays in the mode you selected during intake.</p>
                       </div>
                       <span className="rounded-full bg-neutral-900 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white">
-                        {selectedJobSearchMode === 'curated' ? 'Concise' : 'Wide'}
+                        {selectedJobSearchMode === 'curated' ? 'Default' : 'Wide'}
                       </span>
                     </div>
                   </div>
