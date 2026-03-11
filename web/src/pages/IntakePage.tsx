@@ -733,6 +733,54 @@ export function IntakePage() {
         );
 
       case 'location':
+        if (formData.searchType === SearchType.GRANT) {
+          return (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-[28px] font-bold mb-2">Where is this grant open?</h2>
+                <p className="text-neutral-500 mb-8">Set the eligible geography so the search stays inside the right region or applicant market.</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-semibold mb-2 uppercase tracking-wider text-neutral-400">Location eligibility</label>
+                    <input
+                      type="text"
+                      value={formData.grantLocationEligibility}
+                      onChange={(event) => updateFormData('grantLocationEligibility', event.target.value)}
+                      placeholder="e.g. Global, Africa-based applicants, EU startups"
+                      className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-neutral-900 transition-all"
+                    />
+                    <p className="mt-2 text-xs text-neutral-500">Describe who is eligible by location, residency, or market access.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold mb-2 uppercase tracking-wider text-neutral-400">Region scope</label>
+                    <input
+                      type="text"
+                      value={formData.grantRegionScope}
+                      onChange={(event) => updateFormData('grantRegionScope', event.target.value)}
+                      placeholder="e.g. Global"
+                      className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-neutral-900 transition-all"
+                    />
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {grantRegionSuggestions.map((region) => (
+                        <button
+                          key={region}
+                          type="button"
+                          onClick={() => updateFormData('grantRegionScope', region)}
+                          className="px-2.5 py-1 rounded-md text-xs border border-neutral-200 text-neutral-600 hover:border-neutral-400"
+                        >
+                          {region}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="space-y-6">
             <div>
@@ -769,6 +817,44 @@ export function IntakePage() {
                     <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${formData.remote ? 'left-7' : 'left-1'}`} />
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'applicant':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-[28px] font-bold mb-2">Who is applying for this grant?</h2>
+              <p className="text-neutral-500 mb-8">Choose the applicant profile that best matches this search so the results stay relevant.</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {grantApplicantTypeOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => updateFormData('grantApplicantType', option)}
+                    className={`p-5 rounded-xl border-2 text-left transition-all ${
+                      formData.grantApplicantType === option
+                        ? 'border-neutral-900 bg-neutral-100 text-neutral-900'
+                        : 'border-neutral-100 bg-white text-neutral-500 hover:border-neutral-200'
+                    }`}
+                  >
+                    <p className="font-bold text-base">{option}</p>
+                    <p className="mt-2 text-sm leading-6">
+                      {option === 'Individual'
+                        ? 'Best for solo applicants, creators, and independent professionals.'
+                        : option === 'Startup'
+                        ? 'Best for venture-backed, bootstrapped, or innovation-led companies.'
+                        : option === 'Researcher'
+                        ? 'Best for academics, labs, and research-led funding calls.'
+                        : option === 'NGO'
+                        ? 'Best for nonprofits, community organizations, and development programs.'
+                        : 'Best for founder-led grant programs and entrepreneurship calls.'}
+                    </p>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -1118,6 +1204,41 @@ export function IntakePage() {
           );
         }
 
+        if (formData.searchType === SearchType.GRANT) {
+          return (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-[28px] font-bold mb-2">Upload a supporting document (optional)</h2>
+                <p className="text-neutral-500 mb-3">You can attach a concept note, pitch deck, proposal summary, or call brief for this grant search.</p>
+                <p className="text-xs text-neutral-500 mb-8">Accepted formats: PDF or DOCX, up to 5MB.</p>
+
+                <input
+                  ref={grantFileInputRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  className="hidden"
+                  onChange={(event) => updateFormData('grantDocument', event.target.files?.[0] || null)}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => grantFileInputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-neutral-200 rounded-2xl p-12 text-center bg-white hover:border-neutral-400 transition-all cursor-pointer group"
+                >
+                  <div className="w-16 h-16 bg-neutral-50 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-neutral-100 group-hover:text-neutral-900 transition-all">
+                    <Upload size={32} />
+                  </div>
+                  <h4 className="text-lg font-bold mb-1">Select a supporting file</h4>
+                  <p className="text-sm text-neutral-400 mb-6">Click to browse files from your device</p>
+                  <span className="px-6 py-2 bg-neutral-900 text-white rounded-lg font-medium">Browse Files</span>
+                </button>
+
+                {renderDocumentNotice(formData.grantDocument, () => updateFormData('grantDocument', null), 'emerald')}
+              </div>
+            </div>
+          );
+        }
+
         if (formData.searchType === SearchType.VISA) {
           return (
             <div className="space-y-6">
@@ -1220,6 +1341,74 @@ export function IntakePage() {
                       placeholder="e.g. Fall 2026"
                       className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-neutral-900 transition-all"
                     />
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        if (formData.searchType === SearchType.GRANT) {
+          return (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-[28px] font-bold mb-2">Fine-tune grant preferences</h2>
+                <p className="text-neutral-500 mb-3">These fields are optional, but they help narrow grant fit and funding relevance.</p>
+                <p className="text-xs text-neutral-500 mb-8">Leave empty if you want a broader grant list.</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-semibold mb-2 uppercase tracking-wider text-neutral-400">Focus area</label>
+                    <input
+                      type="text"
+                      value={formData.grantFocusArea}
+                      onChange={(event) => updateFormData('grantFocusArea', event.target.value)}
+                      placeholder="e.g. AI, climate, education"
+                      className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-neutral-900 transition-all"
+                    />
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {grantFocusSuggestions.map((focus) => (
+                        <button
+                          key={focus}
+                          type="button"
+                          onClick={() => updateFormData('grantFocusArea', focus)}
+                          className="px-2.5 py-1 rounded-md text-xs border border-neutral-200 text-neutral-600 hover:border-neutral-400"
+                        >
+                          {focus}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold mb-2 uppercase tracking-wider text-neutral-400">Minimum funding</label>
+                    <input
+                      type="text"
+                      value={formData.grantMinimumFunding}
+                      onChange={(event) => updateFormData('grantMinimumFunding', event.target.value)}
+                      placeholder="e.g. $10,000+"
+                      className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-neutral-900 transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-6">
+                  <label className="block text-sm font-semibold mb-2 uppercase tracking-wider text-neutral-400">Stage</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                    {grantStageSuggestions.map((stage) => (
+                      <button
+                        key={stage}
+                        type="button"
+                        onClick={() => updateFormData('grantStage', stage)}
+                        className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-all ${
+                          formData.grantStage === stage
+                            ? 'border-neutral-900 bg-neutral-900 text-white'
+                            : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-400'
+                        }`}
+                      >
+                        {stage}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
