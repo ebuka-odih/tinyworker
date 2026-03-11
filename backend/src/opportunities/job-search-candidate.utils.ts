@@ -30,6 +30,8 @@ const BLOCKED_TITLE_PATTERNS = [
 ]
 
 const SCHOLARSHIP_KEYWORDS = ['scholarship', 'scholarships', 'fellowship', 'fellowships', 'grant', 'grants', 'bursary', 'bursaries', 'funding']
+const GRANT_KEYWORDS = ['grant', 'grants', 'funding', 'fellowship', 'fellowships', 'award', 'awards']
+const VISA_KEYWORDS = ['visa', 'visas', 'permit', 'permits', 'immigration', 'residence', 'residency', 'entry clearance']
 const BLOCKED_SCHOLARSHIP_TITLE_PATTERNS = [
   /\bapplicant advice\b/i,
   /\bapplication advice\b/i,
@@ -47,6 +49,24 @@ const BLOCKED_SCHOLARSHIP_TITLE_PATTERNS = [
   /\bscholarships and fellowships\b/i,
   /\buniversity bid(?:ding|s?)\b/i,
   /\bwebinar\b/i,
+]
+const BLOCKED_GRANT_TITLE_PATTERNS = [
+  /\babout us\b/i,
+  /\baffiliate\b/i,
+  /\bapplication guide\b/i,
+  /\bfaq\b/i,
+  /\bfaqs\b/i,
+  /\bhow to apply\b/i,
+  /\blisting\b/i,
+  /\bopportunities for\b/i,
+  /\bsearch results\b/i,
+]
+const BLOCKED_VISA_TITLE_PATTERNS = [
+  /\bcontact us\b/i,
+  /\bfaq\b/i,
+  /\bfaqs\b/i,
+  /\bfind out if you need\b/i,
+  /\bsearch results\b/i,
 ]
 
 const BLOCKED_QUERY_KEYS = new Set(['l', 'location', 'page', 'q', 'query', 'radius', 'search', 'sort'])
@@ -91,6 +111,35 @@ const BLOCKED_SCHOLARSHIP_SEGMENTS = new Set([
   'university-bids',
   'eligible-courses',
   'webinars',
+])
+const BLOCKED_GRANT_SEGMENTS = new Set([
+  'about',
+  'about-us',
+  'advice',
+  'affiliate',
+  'blog',
+  'category',
+  'contact',
+  'faq',
+  'faqs',
+  'guidance',
+  'how-to-apply',
+  'listing',
+  'news',
+  'opportunities',
+  'resources',
+  'search',
+  'tag',
+])
+const BLOCKED_VISA_SEGMENTS = new Set([
+  'blog',
+  'contact',
+  'faq',
+  'faqs',
+  'find-out-if-you-need-one',
+  'news',
+  'search',
+  'tools',
 ])
 
 const SCHOLARSHIP_FAMILY_NOISE_PATTERNS = [
@@ -159,6 +208,18 @@ function titleLooksLikeScholarshipAdvicePage(title: string | undefined | null): 
   const normalized = String(title || '').trim()
   if (!normalized) return false
   return BLOCKED_SCHOLARSHIP_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function titleLooksLikeGrantAdvicePage(title: string | undefined | null): boolean {
+  const normalized = String(title || '').trim()
+  if (!normalized) return false
+  return BLOCKED_GRANT_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+function titleLooksLikeVisaAdvicePage(title: string | undefined | null): boolean {
+  const normalized = String(title || '').trim()
+  if (!normalized) return false
+  return BLOCKED_VISA_TITLE_PATTERNS.some((pattern) => pattern.test(normalized))
 }
 
 function getPathSegments(url: URL): string[] {
@@ -296,8 +357,28 @@ function titleHasScholarshipKeyword(title: string | undefined | null): boolean {
   return SCHOLARSHIP_KEYWORDS.some((keyword) => normalized.includes(keyword))
 }
 
+function titleHasGrantKeyword(title: string | undefined | null): boolean {
+  const normalized = normalizeText(title)
+  if (!normalized) return false
+  return GRANT_KEYWORDS.some((keyword) => normalized.includes(keyword))
+}
+
+function titleHasVisaKeyword(title: string | undefined | null): boolean {
+  const normalized = normalizeText(title)
+  if (!normalized) return false
+  return VISA_KEYWORDS.some((keyword) => normalized.includes(keyword))
+}
+
 function pathHasScholarshipKeyword(segments: string[]): boolean {
   return segments.some((segment) => SCHOLARSHIP_KEYWORDS.some((keyword) => segment.includes(keyword)))
+}
+
+function pathHasGrantKeyword(segments: string[]): boolean {
+  return segments.some((segment) => GRANT_KEYWORDS.some((keyword) => segment.includes(keyword)))
+}
+
+function pathHasVisaKeyword(segments: string[]): boolean {
+  return segments.some((segment) => VISA_KEYWORDS.some((keyword) => segment.includes(keyword)))
 }
 
 function isScholarshipPortalUrl(url: URL): boolean {
@@ -321,6 +402,16 @@ function isBachelorstudiesScholarshipUrl(url: URL): boolean {
 function isScholarshipAdviceLikePath(url: URL): boolean {
   const segments = getPathSegments(url)
   return segments.some((segment) => BLOCKED_SCHOLARSHIP_SEGMENTS.has(segment))
+}
+
+function isGrantAdviceLikePath(url: URL): boolean {
+  const segments = getPathSegments(url)
+  return segments.some((segment) => BLOCKED_GRANT_SEGMENTS.has(segment))
+}
+
+function isVisaAdviceLikePath(url: URL): boolean {
+  const segments = getPathSegments(url)
+  return segments.some((segment) => BLOCKED_VISA_SEGMENTS.has(segment))
 }
 
 function singularizeScholarshipToken(token: string): string {
@@ -415,6 +506,14 @@ export function canonicalizeScholarshipUrl(url: string): string | null {
   }
 }
 
+export function canonicalizeGrantUrl(url: string): string | null {
+  return canonicalizeScholarshipUrl(url)
+}
+
+export function canonicalizeVisaUrl(url: string): string | null {
+  return canonicalizeScholarshipUrl(url)
+}
+
 export function normalizeDiscoveryQuery(query: string): string {
   const normalized = String(query || '')
     .replace(/\bjobs?\s+in\s+any location\b/gi, ' ')
@@ -468,6 +567,44 @@ export function isLikelyScholarshipCandidate(candidate: Pick<ValyuDiscoveredCand
   }
 }
 
+export function isLikelyGrantCandidate(candidate: Pick<ValyuDiscoveredCandidate, 'title' | 'url'>): boolean {
+  if (!canonicalizeGrantUrl(candidate.url)) return false
+  if (!titleHasGrantKeyword(candidate.title)) return false
+  if (titleLooksLikeGrantAdvicePage(candidate.title)) return false
+
+  try {
+    const parsed = new URL(candidate.url)
+    const segments = getPathSegments(parsed)
+    if (!segments.length) return false
+    if (hasBlockedSearchParams(parsed)) return false
+    if (isGrantAdviceLikePath(parsed)) return false
+    const terminal = segments[segments.length - 1]
+    if (!terminal || BLOCKED_TERMINAL_SEGMENTS.has(terminal)) return false
+    return titleHasGrantKeyword(candidate.title) || pathHasGrantKeyword(segments)
+  } catch {
+    return false
+  }
+}
+
+export function isLikelyVisaCandidate(candidate: Pick<ValyuDiscoveredCandidate, 'title' | 'url'>): boolean {
+  if (!canonicalizeVisaUrl(candidate.url)) return false
+  if (!titleHasVisaKeyword(candidate.title)) return false
+  if (titleLooksLikeVisaAdvicePage(candidate.title)) return false
+
+  try {
+    const parsed = new URL(candidate.url)
+    const segments = getPathSegments(parsed)
+    if (!segments.length) return false
+    if (hasBlockedSearchParams(parsed)) return false
+    if (isVisaAdviceLikePath(parsed)) return false
+    const terminal = segments[segments.length - 1]
+    if (!terminal || BLOCKED_TERMINAL_SEGMENTS.has(terminal)) return false
+    return titleHasVisaKeyword(candidate.title) || pathHasVisaKeyword(segments)
+  } catch {
+    return false
+  }
+}
+
 export function scholarshipCandidateFamilyKey(
   candidate: Pick<ValyuDiscoveredCandidate, 'title' | 'url' | 'sourceDomain'>,
 ): string {
@@ -488,6 +625,51 @@ export function scholarshipCandidateFamilyKey(
   } catch {
     const fallbackHost = toHost(String(candidate.sourceDomain || 'unknown'))
     const fallbackFamily = cleanScholarshipFamilyText(candidate.title || '') || normalizeText(candidate.title || '') || 'listing'
+    return `${fallbackHost}::${fallbackFamily}`
+  }
+}
+
+export function grantCandidateFamilyKey(
+  candidate: Pick<ValyuDiscoveredCandidate, 'title' | 'url' | 'sourceDomain'>,
+): string {
+  const canonicalUrl = canonicalizeGrantUrl(candidate.url)
+  if (!canonicalUrl) {
+    const fallbackHost = toHost(String(candidate.sourceDomain || 'unknown'))
+    const fallbackFamily = cleanScholarshipFamilyText(candidate.title || '') || normalizeText(candidate.title || '') || 'listing'
+    return `${fallbackHost}::${fallbackFamily}`
+  }
+
+  try {
+    const parsed = new URL(canonicalUrl)
+    const host = toHost(parsed.hostname)
+    const titleFamily = cleanScholarshipFamilyText(candidate.title || '')
+    const pathFamily = deriveScholarshipPathFamily(parsed)
+    return `${host}::${titleFamily || pathFamily || 'listing'}`
+  } catch {
+    const fallbackHost = toHost(String(candidate.sourceDomain || 'unknown'))
+    const fallbackFamily = cleanScholarshipFamilyText(candidate.title || '') || normalizeText(candidate.title || '') || 'listing'
+    return `${fallbackHost}::${fallbackFamily}`
+  }
+}
+
+export function visaCandidateFamilyKey(
+  candidate: Pick<ValyuDiscoveredCandidate, 'title' | 'url' | 'sourceDomain'>,
+): string {
+  const canonicalUrl = canonicalizeVisaUrl(candidate.url)
+  if (!canonicalUrl) {
+    const fallbackHost = toHost(String(candidate.sourceDomain || 'unknown'))
+    const fallbackFamily = normalizeText(candidate.title || '') || 'listing'
+    return `${fallbackHost}::${fallbackFamily}`
+  }
+
+  try {
+    const parsed = new URL(canonicalUrl)
+    const host = toHost(parsed.hostname)
+    const pathFamily = deriveScholarshipPathFamily(parsed) || normalizeText(candidate.title || '') || 'listing'
+    return `${host}::${pathFamily}`
+  } catch {
+    const fallbackHost = toHost(String(candidate.sourceDomain || 'unknown'))
+    const fallbackFamily = normalizeText(candidate.title || '') || 'listing'
     return `${fallbackHost}::${fallbackFamily}`
   }
 }
@@ -571,6 +753,11 @@ export function readyResultScore(item: SearchRunResultItem): number {
     item.deadline,
     item.studyLevel,
     item.fundingType,
+    item.fundingAmount,
+    item.whoCanApply,
+    item.locationEligibility,
+    item.officialApplicationLink,
+    item.processingTime,
     item.matchReason,
     item.snippet,
     ...(item.requirements || []),
@@ -597,6 +784,60 @@ export function filterAndDeduplicateScholarshipCandidates(
     const canonicalUrl = canonicalizeScholarshipUrl(candidate.url)
     if (!canonicalUrl) continue
     if (!isLikelyScholarshipCandidate(candidate)) continue
+    if (!isRecentJobPostingValue(candidate.publicationDate, maxAgeDays)) continue
+
+    const normalized: ValyuDiscoveredCandidate = {
+      ...candidate,
+      url: canonicalUrl,
+    }
+
+    const existing = byCanonicalUrl.get(canonicalUrl)
+    if (!existing || discoveryScore(normalized) > discoveryScore(existing)) {
+      byCanonicalUrl.set(canonicalUrl, normalized)
+    }
+  }
+
+  return Array.from(byCanonicalUrl.values()).sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+}
+
+export function filterAndDeduplicateGrantCandidates(
+  candidates: ValyuDiscoveredCandidate[],
+  options?: { maxAgeDays?: number },
+): ValyuDiscoveredCandidate[] {
+  const byCanonicalUrl = new Map<string, ValyuDiscoveredCandidate>()
+  const maxAgeDays = Math.max(1, Number(options?.maxAgeDays || 365))
+
+  for (const candidate of candidates) {
+    const canonicalUrl = canonicalizeGrantUrl(candidate.url)
+    if (!canonicalUrl) continue
+    if (!isLikelyGrantCandidate(candidate)) continue
+    if (!isRecentJobPostingValue(candidate.publicationDate, maxAgeDays)) continue
+
+    const normalized: ValyuDiscoveredCandidate = {
+      ...candidate,
+      url: canonicalUrl,
+    }
+
+    const existing = byCanonicalUrl.get(canonicalUrl)
+    if (!existing || discoveryScore(normalized) > discoveryScore(existing)) {
+      byCanonicalUrl.set(canonicalUrl, normalized)
+    }
+  }
+
+  return Array.from(byCanonicalUrl.values()).sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+}
+
+export function filterAndDeduplicateVisaCandidates(
+  candidates: ValyuDiscoveredCandidate[],
+  options?: { maxAgeDays?: number },
+): ValyuDiscoveredCandidate[] {
+  const byCanonicalUrl = new Map<string, ValyuDiscoveredCandidate>()
+  const maxAgeDays = Math.max(1, Number(options?.maxAgeDays || 365))
+
+  for (const candidate of candidates) {
+    const canonicalUrl = canonicalizeVisaUrl(candidate.url)
+    if (!canonicalUrl) continue
+    if (!isLikelyVisaCandidate(candidate)) continue
     if (!isRecentJobPostingValue(candidate.publicationDate, maxAgeDays)) continue
 
     const normalized: ValyuDiscoveredCandidate = {

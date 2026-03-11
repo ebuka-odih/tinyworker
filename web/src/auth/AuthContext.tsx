@@ -27,7 +27,7 @@ async function fetchAuthUser(token: string): Promise<AuthUser> {
   }
 
   const payload = (await response.json()) as { user?: AuthUser };
-  if (!payload.user?.userId || !payload.user?.email) {
+  if (!payload.user?.userId || !payload.user?.email || !payload.user?.searchQuota) {
     throw new Error('Invalid auth response');
   }
 

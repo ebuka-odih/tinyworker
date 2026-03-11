@@ -1,12 +1,16 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common'
 import {
   filterAndDeduplicateDiscoveredCandidates,
+  filterAndDeduplicateGrantCandidates,
   filterAndDeduplicateScholarshipCandidates,
+  filterAndDeduplicateVisaCandidates,
   normalizeDiscoveryQuery,
 } from './job-search-candidate.utils'
+import { resolveGrantSourceMeta } from './grant-source-registry'
 import type { JobSearchMode } from './job-search-mode'
 import { resolveSourceMeta } from './job-source-registry'
 import { resolveScholarshipSourceMeta } from './scholarship-source-registry'
+import { resolveVisaSourceMeta } from './visa-source-registry'
 
 type ValyuSearchResult = {
   title?: string
@@ -68,6 +72,18 @@ type ScholarshipSearchInput = {
   includedSources?: string[]
 }
 
+type GrantSearchInput = {
+  query: string
+  maxNumResults: number
+  includedSources?: string[]
+}
+
+type VisaSearchInput = {
+  query: string
+  maxNumResults: number
+  includedSources?: string[]
+}
+
 export type ValyuDiscoveredCandidate = {
   id: string
   title: string
@@ -83,6 +99,34 @@ export type ValyuDiscoveredCandidate = {
 }
 
 export type ValyuDiscoveredScholarshipCandidate = {
+  id: string
+  title: string
+  url: string
+  snippet: string
+  relevance: number
+  publicationDate?: string
+  sourceLabel?: string
+  sourceName: string
+  sourceDomain: string
+  sourceType: 'job_board' | 'company_careers'
+  sourceVerified: boolean
+}
+
+export type ValyuDiscoveredGrantCandidate = {
+  id: string
+  title: string
+  url: string
+  snippet: string
+  relevance: number
+  publicationDate?: string
+  sourceLabel?: string
+  sourceName: string
+  sourceDomain: string
+  sourceType: 'job_board' | 'company_careers'
+  sourceVerified: boolean
+}
+
+export type ValyuDiscoveredVisaCandidate = {
   id: string
   title: string
   url: string
@@ -251,6 +295,116 @@ export class ValyuSearchService {
     }) as ValyuDiscoveredScholarshipCandidate[]
   }
 
+  async discoverGrantCandidates(input: GrantSearchInput): Promise<ValyuDiscoveredGrantCandidate[]> {
+    const apiKey = process.env.VALYU_API_KEY
+    if (!apiKey) {
+      throw new ServiceUnavailableException('VALYU_API_KEY is not configured')
+    }
+
+    const variants = this.buildGrantQueryVariants(input)
+    const aggregated: ValyuDiscoveredGrantCandidate[] = []
+
+    for (let variantIndex = 0; variantIndex < variants.length; variantIndex += 1) {
+      const rawResults = await this.executeValyuSearch(apiKey, {
+        query: variants[variantIndex],
+        search_type: 'web',
+        max_num_results: Math.min(20, Math.max(5, input.maxNumResults)),
+        category: 'grants',
+        response_length: 'short',
+        fast_mode: true,
+        start_date: this.formatDateDaysAgo(365),
+        end_date: this.formatDateDaysAgo(0),
+        included_sources: input.includedSources?.length ? input.includedSources : undefined,
+      })
+
+      rawResults.forEach((item, idx) => {
+        const relevance = item.relevance_score ?? item.score ?? 0
+        const url = item.url || ''
+        if (!url) return
+        const sourceMeta = resolveGrantSourceMeta(url, item.source)
+        aggregated.push({
+          id: `${Date.now()}-grant-${variantIndex}-${idx}`,
+          title: item.title || 'Untitled grant',
+          url,
+          snippet: item.snippet || item.description || item.content || '',
+          relevance,
+          publicationDate: item.publication_date || undefined,
+          sourceLabel: item.source || undefined,
+          sourceName: sourceMeta.sourceName,
+          sourceDomain: sourceMeta.sourceDomain,
+          sourceType: sourceMeta.sourceType,
+          sourceVerified: sourceMeta.sourceVerified,
+        })
+      })
+
+      const filtered = filterAndDeduplicateGrantCandidates(aggregated as ValyuDiscoveredCandidate[], {
+        maxAgeDays: 365,
+      }) as ValyuDiscoveredGrantCandidate[]
+      if (filtered.length >= input.maxNumResults) {
+        return filtered
+      }
+    }
+
+    return filterAndDeduplicateGrantCandidates(aggregated as ValyuDiscoveredCandidate[], {
+      maxAgeDays: 365,
+    }) as ValyuDiscoveredGrantCandidate[]
+  }
+
+  async discoverVisaCandidates(input: VisaSearchInput): Promise<ValyuDiscoveredVisaCandidate[]> {
+    const apiKey = process.env.VALYU_API_KEY
+    if (!apiKey) {
+      throw new ServiceUnavailableException('VALYU_API_KEY is not configured')
+    }
+
+    const variants = this.buildVisaQueryVariants(input)
+    const aggregated: ValyuDiscoveredVisaCandidate[] = []
+
+    for (let variantIndex = 0; variantIndex < variants.length; variantIndex += 1) {
+      const rawResults = await this.executeValyuSearch(apiKey, {
+        query: variants[variantIndex],
+        search_type: 'web',
+        max_num_results: Math.min(20, Math.max(5, input.maxNumResults)),
+        category: 'visa',
+        response_length: 'short',
+        fast_mode: true,
+        start_date: this.formatDateDaysAgo(365),
+        end_date: this.formatDateDaysAgo(0),
+        included_sources: input.includedSources?.length ? input.includedSources : undefined,
+      })
+
+      rawResults.forEach((item, idx) => {
+        const relevance = item.relevance_score ?? item.score ?? 0
+        const url = item.url || ''
+        if (!url) return
+        const sourceMeta = resolveVisaSourceMeta(url, item.source)
+        aggregated.push({
+          id: `${Date.now()}-visa-${variantIndex}-${idx}`,
+          title: item.title || 'Untitled visa route',
+          url,
+          snippet: item.snippet || item.description || item.content || '',
+          relevance,
+          publicationDate: item.publication_date || undefined,
+          sourceLabel: item.source || undefined,
+          sourceName: sourceMeta.sourceName,
+          sourceDomain: sourceMeta.sourceDomain,
+          sourceType: sourceMeta.sourceType,
+          sourceVerified: sourceMeta.sourceVerified,
+        })
+      })
+
+      const filtered = filterAndDeduplicateVisaCandidates(aggregated as ValyuDiscoveredCandidate[], {
+        maxAgeDays: 365,
+      }) as ValyuDiscoveredVisaCandidate[]
+      if (filtered.length >= input.maxNumResults) {
+        return filtered
+      }
+    }
+
+    return filterAndDeduplicateVisaCandidates(aggregated as ValyuDiscoveredCandidate[], {
+      maxAgeDays: 365,
+    }) as ValyuDiscoveredVisaCandidate[]
+  }
+
   async extractJobPageContent(url: string, query: string): Promise<ValyuExtractedJobContent | null> {
     const apiKey = process.env.VALYU_API_KEY
     if (!apiKey) {
@@ -404,6 +558,88 @@ export class ValyuSearchService {
       }
       if (this.hasSource(input.includedSources, 'opportunitiesforafricans.com')) {
         siteScopedQuery('opportunitiesforafricans.com')
+      }
+    }
+
+    return Array.from(variants).filter(Boolean)
+  }
+
+  private buildGrantQueryVariants(input: GrantSearchInput): string[] {
+    const normalized = normalizeDiscoveryQuery(String(input.query || '').trim())
+      .replace(/\bjobs?\b/gi, ' ')
+      .replace(/\brole\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const variants = new Set<string>()
+    const base = normalized
+    const siteScopedQuery = (domain: string, extra = '') => {
+      if (!base) return
+      variants.add(`site:${domain} ${base} grant funding ${extra}`.trim())
+    }
+
+    if (base) {
+      if (this.hasSource(input.includedSources, 'grants.gov')) {
+        siteScopedQuery('grants.gov')
+      }
+      if (this.hasSource(input.includedSources, 'wellcome.org')) {
+        siteScopedQuery('wellcome.org/grant-funding')
+      }
+      if (this.hasSource(input.includedSources, 'echoinggreen.org')) {
+        siteScopedQuery('echoinggreen.org', '"fellowship"')
+      }
+      if (this.hasSource(input.includedSources, 'ec.europa.eu') || this.hasSource(input.includedSources, 'europa.eu')) {
+        siteScopedQuery('ec.europa.eu', '"funding"')
+        siteScopedQuery('europa.eu', '"grant"')
+      }
+      if (this.hasSource(input.includedSources, 'fundsforngos.org')) {
+        siteScopedQuery('fundsforngos.org')
+      }
+      if (this.hasSource(input.includedSources, 'www2.fundsforngos.org')) {
+        siteScopedQuery('www2.fundsforngos.org')
+      }
+      if (this.hasSource(input.includedSources, 'opportunitydesk.org')) {
+        siteScopedQuery('opportunitydesk.org')
+      }
+      if (this.hasSource(input.includedSources, 'africaopportunities.com')) {
+        siteScopedQuery('africaopportunities.com')
+      }
+      if (this.hasSource(input.includedSources, 'youthopportunitieshub.com')) {
+        siteScopedQuery('youthopportunitieshub.com')
+      }
+      if (this.hasSource(input.includedSources, 'globalgrants.info')) {
+        siteScopedQuery('globalgrants.info')
+      }
+      if (this.hasSource(input.includedSources, 'scholarshippositions.com')) {
+        siteScopedQuery('scholarshippositions.com')
+      }
+    }
+
+    return Array.from(variants).filter(Boolean)
+  }
+
+  private buildVisaQueryVariants(input: VisaSearchInput): string[] {
+    const normalized = String(input.query || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const variants = new Set<string>()
+    const base = normalized
+    const siteScopedQuery = (domain: string, extra = '') => {
+      if (!base) return
+      variants.add(`site:${domain} ${base} visa requirements ${extra}`.trim())
+    }
+
+    if (base) {
+      if (this.hasSource(input.includedSources, 'canada.ca')) {
+        siteScopedQuery('canada.ca')
+      }
+      if (this.hasSource(input.includedSources, 'gov.uk')) {
+        siteScopedQuery('gov.uk')
+      }
+      if (this.hasSource(input.includedSources, 'make-it-in-germany.com')) {
+        siteScopedQuery('make-it-in-germany.com', '"visa"')
+      }
+      if (this.hasSource(input.includedSources, 'ind.nl')) {
+        siteScopedQuery('ind.nl', '"residence permit"')
       }
     }
 

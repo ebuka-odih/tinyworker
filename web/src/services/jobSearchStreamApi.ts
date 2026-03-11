@@ -1,9 +1,9 @@
-import { SearchCacheState, SearchResult } from '../types';
-import { API_BASE, ApiUnauthorizedError, buildAuthHeaders, readErrorMessage } from './apiBase';
+import { BillingLimitError, SearchCacheState, SearchResult } from '../types';
+import { API_BASE, ApiPaymentRequiredError, ApiUnauthorizedError, buildAuthHeaders, readErrorDetails, readErrorMessage } from './apiBase';
 import type { JobSearchMode } from './searchSessionStore';
 
-export { ApiUnauthorizedError } from './apiBase';
-export type SearchRunKind = 'jobs' | 'scholarships';
+export { ApiPaymentRequiredError, ApiUnauthorizedError } from './apiBase';
+export type SearchRunKind = 'jobs' | 'scholarships' | 'grants' | 'visas';
 
 export type StartSearchRunParams = {
   token: string;
@@ -14,6 +14,7 @@ export type StartSearchRunParams = {
   sourceScope?: 'global' | 'regional';
   remote?: boolean;
   visaSponsorship?: boolean;
+  body?: Record<string, unknown>;
 };
 
 export type SearchRunEventType =
@@ -81,17 +82,23 @@ async function startSearchRun(kind: SearchRunKind, params: StartSearchRunParams)
     }),
     body: JSON.stringify({
       query: params.query,
-      mode: params.mode ?? 'classic',
-      countryCode: params.countryCode,
-      maxNumResults: params.maxNumResults ?? 10,
+      maxNumResults: params.maxNumResults ?? 5,
       sourceScope: params.sourceScope ?? 'global',
-      remote: params.remote ?? false,
-      visaSponsorship: params.visaSponsorship ?? false,
+      ...(typeof params.mode === 'string' ? { mode: params.mode } : {}),
+      ...(typeof params.countryCode === 'string' ? { countryCode: params.countryCode } : {}),
+      ...(typeof params.remote === 'boolean' ? { remote: params.remote } : {}),
+      ...(typeof params.visaSponsorship === 'boolean' ? { visaSponsorship: params.visaSponsorship } : {}),
+      ...(params.body || {}),
     }),
   });
 
   if (response.status === 401) {
     throw new ApiUnauthorizedError();
+  }
+
+  if (response.status === 402) {
+    const details = await readErrorDetails(response, `Failed to start search run (${response.status})`);
+    throw new ApiPaymentRequiredError<BillingLimitError>(details.message, (details.payload || null) as BillingLimitError | null);
   }
 
   if (!response.ok) {
@@ -273,12 +280,28 @@ export function connectScholarshipSearchRunStream(params: StreamParams): { close
   return connectSearchRunStream('scholarships', params);
 }
 
+export function connectGrantSearchRunStream(params: StreamParams): { close: () => void } {
+  return connectSearchRunStream('grants', params);
+}
+
+export function connectVisaSearchRunStream(params: StreamParams): { close: () => void } {
+  return connectSearchRunStream('visas', params);
+}
+
 export async function startJobSearchRun(params: StartSearchRunParams): Promise<{ runId: string }> {
   return await startSearchRun('jobs', params);
 }
 
 export async function startScholarshipSearchRun(params: StartSearchRunParams): Promise<{ runId: string }> {
   return await startSearchRun('scholarships', params);
+}
+
+export async function startGrantSearchRun(params: StartSearchRunParams): Promise<{ runId: string }> {
+  return await startSearchRun('grants', params);
+}
+
+export async function startVisaSearchRun(params: StartSearchRunParams): Promise<{ runId: string }> {
+  return await startSearchRun('visas', params);
 }
 
 export async function stopJobSearchRun(runId: string, token: string): Promise<void> {
@@ -289,10 +312,26 @@ export async function stopScholarshipSearchRun(runId: string, token: string): Pr
   return await stopSearchRun('scholarships', runId, token);
 }
 
+export async function stopGrantSearchRun(runId: string, token: string): Promise<void> {
+  return await stopSearchRun('grants', runId, token);
+}
+
+export async function stopVisaSearchRun(runId: string, token: string): Promise<void> {
+  return await stopSearchRun('visas', runId, token);
+}
+
 export async function getJobSearchRunSnapshot(runId: string, token: string): Promise<SearchRunSnapshot | null> {
   return await getSearchRunSnapshot('jobs', runId, token);
 }
 
 export async function getScholarshipSearchRunSnapshot(runId: string, token: string): Promise<SearchRunSnapshot | null> {
   return await getSearchRunSnapshot('scholarships', runId, token);
+}
+
+export async function getGrantSearchRunSnapshot(runId: string, token: string): Promise<SearchRunSnapshot | null> {
+  return await getSearchRunSnapshot('grants', runId, token);
+}
+
+export async function getVisaSearchRunSnapshot(runId: string, token: string): Promise<SearchRunSnapshot | null> {
+  return await getSearchRunSnapshot('visas', runId, token);
 }

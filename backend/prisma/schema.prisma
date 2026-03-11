@@ -22,8 +22,122 @@ model User {
   documents     Document[]
   intents       CandidateIntent[]
   jobSearchRuns JobSearchRun[]
+  billingCustomers BillingCustomer[]
+  subscriptions Subscription[]
+  billingCheckouts BillingCheckout[]
+  dailySearchUsages DailySearchUsage[]
 
   @@index([createdAt])
+}
+
+model BillingCustomer {
+  id                 String   @id @default(uuid())
+  userId             String
+  provider           String
+  providerCustomerId String
+  email              String
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+  checkouts     BillingCheckout[]
+
+  @@unique([provider, providerCustomerId])
+  @@unique([userId, provider])
+  @@index([email])
+}
+
+model Subscription {
+  id                     String   @id @default(uuid())
+  userId                 String
+  billingCustomerId      String?
+  provider               String
+  tier                   String   @default("pro")
+  interval               String
+  currency               String
+  amountMinor            Int
+  providerSubscriptionId String
+  providerPlanRef        String?
+  providerProductRef     String?
+  status                 String   @default("inactive")
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean  @default(false)
+  canceledAt             DateTime?
+  metadata               Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  billingCustomer BillingCustomer? @relation(fields: [billingCustomerId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerSubscriptionId])
+  @@index([userId, createdAt])
+  @@index([userId, status, currentPeriodEnd])
+}
+
+model BillingCheckout {
+  id                String   @id @default(uuid())
+  userId            String
+  billingCustomerId String?
+  provider          String
+  planKey           String
+  tier              String   @default("pro")
+  interval          String
+  currency          String
+  amountMinor       Int?
+  providerCheckoutId String?
+  providerReference String?
+  status            String   @default("pending")
+  redirectUrl       String?
+  completedAt       DateTime?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  billingCustomer BillingCustomer? @relation(fields: [billingCustomerId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerCheckoutId])
+  @@unique([provider, providerReference])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model BillingWebhookEvent {
+  id              String   @id @default(uuid())
+  provider        String
+  externalEventId String?
+  dedupeKey       String   @unique
+  eventType       String?
+  payload         Json
+  status          String   @default("pending")
+  errorMessage    String?
+  receivedAt      DateTime @default(now())
+  processedAt     DateTime?
+
+  @@index([provider, receivedAt])
+  @@index([status, receivedAt])
+}
+
+model DailySearchUsage {
+  id                      String   @id @default(uuid())
+  userId                  String
+  usageDate               DateTime
+  runsConsumed            Int      @default(0)
+  jobRunsConsumed         Int      @default(0)
+  scholarshipRunsConsumed Int      @default(0)
+  grantRunsConsumed       Int      @default(0)
+  visaRunsConsumed        Int      @default(0)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, usageDate])
+  @@index([usageDate])
 }
 
 model CandidateIntent {
@@ -106,7 +220,7 @@ model CandidateProfile {
 model Opportunity {
   id           String   @id @default(uuid())
   userId       String
-  type         String // job|scholarship|visa
+  type         String // job|scholarship|grant|visa
   title        String
   organization String?
   location     String?
@@ -116,6 +230,7 @@ model Opportunity {
   deadline     String?
   matchScore   Float?
   source       String   @default("tinyfish")
+  metadata     Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

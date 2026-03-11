@@ -29,6 +29,13 @@ const useCases = [
     icon: GraduationCap,
   },
   {
+    id: 'grant',
+    title: 'Grant Search',
+    description:
+      'Find open grant opportunities for founders, nonprofits, researchers, and innovators with direct funding and clear application routes.',
+    icon: ShieldCheck,
+  },
+  {
     id: 'visa',
     title: 'Visa Guidance',
     description:
@@ -40,7 +47,7 @@ const useCases = [
 const steps = [
   {
     title: 'Choose a search type',
-    body: 'Select whether you want to search for jobs, scholarships, or visa requirements.',
+    body: 'Select whether you want to search for jobs, scholarships, grants, or visa requirements.',
   },
   {
     title: 'Add your criteria',
@@ -61,6 +68,7 @@ const sourceTypes = [
   'Career Pages',
   'University Funding Pages',
   'Scholarship Sources',
+  'Grant Programs',
   'Immigration Resources',
 ] as const;
 
@@ -115,11 +123,11 @@ export function LandingPage() {
               AI-powered opportunity search
             </div>
             <h1 className="mt-5 text-[36px] font-bold tracking-tight text-neutral-950 md:text-[52px] md:leading-[1.02]">
-              Find jobs, scholarships, and visa pathways faster.
+              Find jobs, scholarships, grants, and visa pathways faster.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-8 text-neutral-600 md:text-lg">
-              TinyFinder searches across job boards, scholarship sources, and official visa information pages to help
-              you discover relevant opportunities with less manual searching.
+              TinyFinder searches across job boards, scholarship sources, grant programs, and official visa
+              information pages to help you discover relevant opportunities with less manual searching.
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -141,7 +149,7 @@ export function LandingPage() {
             </div>
 
             <p className="mt-5 text-sm leading-7 text-neutral-500">
-              Search across job platforms, university funding pages, and official immigration resources.
+              Search across job platforms, funding pages, grant programs, and official immigration resources.
             </p>
           </div>
 
@@ -156,6 +164,10 @@ export function LandingPage() {
                 {
                   title: 'Scholarships',
                   body: 'Scholarship sources, university funding pages, and study opportunities.',
+                },
+                {
+                  title: 'Grants',
+                  body: 'Official grant programs and vetted discovery sources that lead to direct application pages.',
                 },
                 {
                   title: 'Visa pathways',
@@ -194,7 +206,7 @@ export function LandingPage() {
           </p>
         </div>
 
-        <div className="mt-8 grid gap-5 md:grid-cols-3">
+        <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           {useCases.map((item, index) => (
             <motion.div
               key={item.id}

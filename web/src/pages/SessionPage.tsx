@@ -18,16 +18,25 @@ import {
   Crown,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { AuthUser, JobQueueStatus, SearchCacheState, SearchResult, SearchType, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
+import { AuthUser, BillingLimitError, JobQueueStatus, SearchCacheState, SearchResult, SearchType, TimelineItem, TimelineSeverity, TimelineStatus } from '../types';
 import {
+  ApiPaymentRequiredError,
   ApiUnauthorizedError,
   SearchRunEvent,
   SearchRunMetrics,
   SearchRunSnapshot,
+  connectGrantSearchRunStream,
+  connectVisaSearchRunStream,
   connectScholarshipSearchRunStream,
   getScholarshipSearchRunSnapshot,
+  getGrantSearchRunSnapshot,
+  getVisaSearchRunSnapshot,
   startScholarshipSearchRun,
+  startGrantSearchRun,
+  startVisaSearchRun,
   stopScholarshipSearchRun,
+  stopGrantSearchRun,
+  stopVisaSearchRun,
   connectJobSearchRunStream,
   getJobSearchRunSnapshot,
   startJobSearchRun,
@@ -42,6 +51,7 @@ import {
 } from '../services/searchSessionStore';
 import { useAuth } from '../auth/AuthContext';
 import { JobDetailsModal } from '../components/JobDetailsModal';
+import { createBillingCheckoutSession } from '../services/billingApi';
 import { listSavedOpportunities, saveOpportunity } from '../services/opportunitiesApi';
 
 type SessionLocationState = {
@@ -197,10 +207,31 @@ const SCHOLARSHIP_SOURCE_CATALOG = [
   { name: 'Opportunities for Africans', domain: 'opportunitiesforafricans.com' },
 ] as const;
 
+const GRANT_SOURCE_CATALOG = [
+  { name: 'Grants.gov', domain: 'grants.gov' },
+  { name: 'Wellcome', domain: 'wellcome.org' },
+  { name: 'Echoing Green', domain: 'echoinggreen.org' },
+  { name: 'EU Funding & Tenders', domain: 'europa.eu' },
+  { name: 'Funds for NGOs', domain: 'fundsforngos.org' },
+  { name: 'Opportunity Desk', domain: 'opportunitydesk.org' },
+  { name: 'Africa Opportunities', domain: 'africaopportunities.com' },
+  { name: 'Youth Opportunities Hub', domain: 'youthopportunitieshub.com' },
+] as const;
+
+const VISA_SOURCE_CATALOG = [
+  { name: 'Canada IRCC', domain: 'canada.ca' },
+  { name: 'GOV.UK', domain: 'gov.uk' },
+  { name: 'Make it in Germany', domain: 'make-it-in-germany.com' },
+  { name: 'IND Netherlands', domain: 'ind.nl' },
+] as const;
+
 function hasSessionCriteria(formData: JobSearchIntakeData | null | undefined, type: SearchType = SearchType.JOB) {
   if (!formData) return false;
   if (type === SearchType.SCHOLARSHIP) {
     return Boolean(formData.scholarshipQuery || formData.destinationRegion || formData.studyLevel || formData.academicBackground);
+  }
+  if (type === SearchType.GRANT) {
+    return Boolean(formData.grantQuery || formData.grantApplicantType || formData.grantFocusArea || formData.grantLocationEligibility);
   }
   if (type === SearchType.VISA) {
     return Boolean(formData.visaCountry || formData.visaCategory || formData.nationality || formData.travelReason);
@@ -274,6 +305,53 @@ function formatScholarshipCompletionSummary(metrics: SearchRunMetrics | null | u
     return `Reviewed ${discovered} links and finished the scholarship scan. Results are now stable.`;
   }
   return 'Queue finished and results are now stable.';
+}
+
+function formatGrantDiscoverySummary(metrics: SearchRunMetrics | null | undefined) {
+  const discovered = Number(metrics?.discovered || 0);
+  const filteredOut = Number(metrics?.filteredOut || 0);
+  const selected = Number(metrics?.selectedForExtraction || 0);
+  const parts: string[] = [];
+
+  if (discovered > 0) parts.push(`${discovered} grant pages discovered`);
+  if (filteredOut > 0) parts.push(`${filteredOut} filtered out`);
+  if (selected > 0) {
+    parts.push(`${selected} shortlisted for TinyFish`);
+  } else if (discovered > 0) {
+    parts.push('No grant pages were shortlisted');
+  }
+
+  return parts.join(' • ') || 'Discovery finished across trusted grant sources.';
+}
+
+function formatGrantExtractionSummary(
+  metrics: SearchRunMetrics | null | undefined,
+  counts: { ready: number; failed: number; queued: number },
+) {
+  const selected = Number(metrics?.selectedForExtraction || 0);
+  const extractedReady = Number(metrics?.extractedReady ?? counts.ready);
+  const extractedFailed = Number(metrics?.extractedFailed ?? counts.failed);
+  const remaining = Math.max(0, counts.queued || selected - extractedReady - extractedFailed);
+  const parts = [
+    selected > 0 ? `${selected} shortlisted` : `${counts.ready + counts.failed + counts.queued} tracked`,
+    `${extractedReady} ready`,
+    `${extractedFailed} failed`,
+  ];
+
+  if (remaining > 0) parts.push(`${remaining} remaining`);
+  return parts.join(' • ');
+}
+
+function formatGrantCompletionSummary(metrics: SearchRunMetrics | null | undefined) {
+  const discovered = Number(metrics?.discovered || 0);
+  const selected = Number(metrics?.selectedForExtraction || 0);
+  if (discovered > 0 && selected > 0) {
+    return `Reviewed ${discovered} grant pages and sent ${selected} shortlisted pages to TinyFish. Results are now stable.`;
+  }
+  if (discovered > 0) {
+    return `Reviewed ${discovered} grant pages and finished the grant scan. Results are now stable.`;
+  }
+  return 'Queue finished and grant results are now stable.';
 }
 
 function buildTimelineItem(
@@ -378,9 +456,9 @@ function resolveSessionType(
   formData: JobSearchIntakeData | null | undefined,
   persistedType?: SearchType,
 ): SearchType {
-  if (explicitType === SearchType.SCHOLARSHIP || explicitType === SearchType.VISA || explicitType === SearchType.JOB) return explicitType;
-  if (persistedType === SearchType.SCHOLARSHIP || persistedType === SearchType.VISA || persistedType === SearchType.JOB) return persistedType;
-  if (formData?.searchType === SearchType.SCHOLARSHIP || formData?.searchType === SearchType.VISA || formData?.searchType === SearchType.JOB) {
+  if (explicitType === SearchType.SCHOLARSHIP || explicitType === SearchType.GRANT || explicitType === SearchType.VISA || explicitType === SearchType.JOB) return explicitType;
+  if (persistedType === SearchType.SCHOLARSHIP || persistedType === SearchType.GRANT || persistedType === SearchType.VISA || persistedType === SearchType.JOB) return persistedType;
+  if (formData?.searchType === SearchType.SCHOLARSHIP || formData?.searchType === SearchType.GRANT || formData?.searchType === SearchType.VISA || formData?.searchType === SearchType.JOB) {
     return formData.searchType;
   }
   return SearchType.JOB;
@@ -388,7 +466,6 @@ function resolveSessionType(
 
 function getSubscriptionTier(authUser: AuthUser | null): 'free' | 'pro' | 'team' {
   const rawTier = String(authUser?.subscriptionTier || '').trim().toLowerCase();
-  if (authUser?.isPro) return 'pro';
   if (rawTier === 'team' || rawTier === 'business' || rawTier === 'enterprise') return 'team';
   if (rawTier === 'pro' || rawTier === 'premium' || rawTier === 'paid') return 'pro';
   return 'free';
@@ -446,20 +523,34 @@ export function SessionPage() {
     if (sessionType === SearchType.SCHOLARSHIP) {
       return sessionFormData.scholarshipQuery || 'Scholarship Search';
     }
+    if (sessionType === SearchType.GRANT) {
+      return sessionFormData.grantQuery || sessionFormData.grantFocusArea || 'Grant Search';
+    }
     if (sessionType === SearchType.VISA) {
       return sessionFormData.visaCountry ? `${sessionFormData.visaCountry} Visa` : 'Visa Search';
     }
     return roles[0] || 'Backend Roles';
-  }, [roles, sessionFormData.scholarshipQuery, sessionFormData.visaCountry, sessionType]);
+  }, [roles, sessionFormData.grantFocusArea, sessionFormData.grantQuery, sessionFormData.scholarshipQuery, sessionFormData.visaCountry, sessionType]);
   const locationLabel = React.useMemo(() => {
     if (sessionType === SearchType.SCHOLARSHIP) {
       return sessionFormData.destinationRegion || 'Any destination';
+    }
+    if (sessionType === SearchType.GRANT) {
+      return sessionFormData.grantLocationEligibility || sessionFormData.grantRegionScope || 'Global eligibility';
     }
     if (sessionType === SearchType.VISA) {
       return sessionFormData.currentResidence || sessionFormData.nationality || 'Current profile';
     }
     return sessionFormData.location || 'Any location';
-  }, [sessionFormData.currentResidence, sessionFormData.destinationRegion, sessionFormData.location, sessionFormData.nationality, sessionType]);
+  }, [
+    sessionFormData.currentResidence,
+    sessionFormData.destinationRegion,
+    sessionFormData.grantLocationEligibility,
+    sessionFormData.grantRegionScope,
+    sessionFormData.location,
+    sessionFormData.nationality,
+    sessionType,
+  ]);
   const countryCode =
     sessionType === SearchType.JOB && sessionFormData.location && sessionFormData.location !== 'Any location'
       ? COUNTRY_CODES[sessionFormData.location]
@@ -474,6 +565,20 @@ export function SessionPage() {
         sessionFormData.intakeTerm,
         sessionFormData.academicBackground,
         'scholarship',
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
+    if (sessionType === SearchType.GRANT) {
+      return [
+        sessionFormData.grantQuery,
+        sessionFormData.grantApplicantType,
+        sessionFormData.grantFocusArea,
+        sessionFormData.grantLocationEligibility,
+        sessionFormData.grantMinimumFunding,
+        sessionFormData.grantStage,
+        sessionFormData.grantRegionScope,
+        'grant',
       ]
         .filter(Boolean)
         .join(' ');
@@ -504,6 +609,13 @@ export function SessionPage() {
     sessionFormData.academicBackground,
     sessionFormData.destinationRegion,
     sessionFormData.fundingType,
+    sessionFormData.grantApplicantType,
+    sessionFormData.grantFocusArea,
+    sessionFormData.grantLocationEligibility,
+    sessionFormData.grantMinimumFunding,
+    sessionFormData.grantQuery,
+    sessionFormData.grantRegionScope,
+    sessionFormData.grantStage,
     sessionFormData.intakeTerm,
     sessionFormData.location,
     sessionFormData.nationality,
@@ -538,6 +650,8 @@ export function SessionPage() {
   const [resultStageFilter, setResultStageFilter] = React.useState<ResultStageFilter>('all');
   const [resultSourceFilter, setResultSourceFilter] = React.useState<string>('all');
   const [isResultFiltersOpen, setIsResultFiltersOpen] = React.useState(false);
+  const [billingLimitError, setBillingLimitError] = React.useState<BillingLimitError | null>(null);
+  const [billingCheckoutKey, setBillingCheckoutKey] = React.useState<string | null>(null);
 
   const streamRef = React.useRef<{ close: () => void } | null>(null);
   const snapshotPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -657,9 +771,17 @@ export function SessionPage() {
           previous.queued !== counts.queued
         ) {
           addTimelineEvent(
-            sessionType === SearchType.SCHOLARSHIP ? 'Scholarship background progress' : 'Background progress',
+            sessionType === SearchType.SCHOLARSHIP
+              ? 'Scholarship background progress'
+              : sessionType === SearchType.GRANT
+              ? 'Grant background progress'
+              : sessionType === SearchType.VISA
+              ? 'Visa background progress'
+              : 'Background progress',
             sessionType === SearchType.SCHOLARSHIP
               ? formatScholarshipExtractionSummary(metrics, counts)
+              : sessionType === SearchType.GRANT
+              ? formatGrantExtractionSummary(metrics, counts)
               : `${counts.ready} ready • ${counts.failed} failed • ${counts.queued} queued`,
             'info',
             'running',
@@ -678,6 +800,8 @@ export function SessionPage() {
           'Search completed',
           sessionType === SearchType.SCHOLARSHIP
             ? formatScholarshipCompletionSummary(metrics)
+            : sessionType === SearchType.GRANT
+            ? formatGrantCompletionSummary(metrics)
             : 'Queue finished and results are now stable.',
           'success',
         );
@@ -731,9 +855,19 @@ export function SessionPage() {
 
       if (event.type === 'source_scan_started') {
         addTimelineEvent(
-          sessionType === SearchType.SCHOLARSHIP ? 'Scanning verified scholarship sources' : 'Scanning verified job sources',
+          sessionType === SearchType.SCHOLARSHIP
+            ? 'Scanning verified scholarship sources'
+            : sessionType === SearchType.GRANT
+            ? 'Scanning verified grant sources'
+            : sessionType === SearchType.VISA
+            ? 'Scanning official visa sources'
+            : 'Scanning verified job sources',
           sessionType === SearchType.SCHOLARSHIP
             ? 'Valyu is collecting links from trusted scholarship websites before a capped TinyFish shortlist is created.'
+            : sessionType === SearchType.GRANT
+            ? 'Valyu is collecting official grant pages and scout candidates before a capped TinyFish shortlist is created.'
+            : sessionType === SearchType.VISA
+            ? 'Discovery phase started across official government visa websites.'
             : 'Discovery phase started across trusted job websites.',
           'info',
           'running',
@@ -745,9 +879,19 @@ export function SessionPage() {
         const item = event.payload.result as SearchResult;
         upsertResult(item);
         addTimelineEvent(
-          sessionType === SearchType.SCHOLARSHIP ? 'Scholarship shortlisted' : 'Opportunity queued',
+          sessionType === SearchType.SCHOLARSHIP
+            ? 'Scholarship shortlisted'
+            : sessionType === SearchType.GRANT
+            ? 'Grant shortlisted'
+            : sessionType === SearchType.VISA
+            ? 'Visa route queued'
+            : 'Opportunity queued',
           sessionType === SearchType.SCHOLARSHIP
             ? `${item.title} from ${item.sourceName} is shortlisted for TinyFish extraction.`
+            : sessionType === SearchType.GRANT
+            ? `${item.title} from ${item.sourceName} is shortlisted for grant extraction.`
+            : sessionType === SearchType.VISA
+            ? `${item.title} from ${item.sourceName} is queued for official route extraction.`
             : `${item.title} from ${item.sourceName} is queued for extraction.`,
           'info',
           'queued',
@@ -759,7 +903,13 @@ export function SessionPage() {
         const item = event.payload.result as SearchResult;
         upsertResult(item);
         addTimelineEvent(
-          sessionType === SearchType.SCHOLARSHIP ? 'Extracting scholarship details' : 'Extracting job details',
+          sessionType === SearchType.SCHOLARSHIP
+            ? 'Extracting scholarship details'
+            : sessionType === SearchType.GRANT
+            ? 'Extracting grant details'
+            : sessionType === SearchType.VISA
+            ? 'Extracting visa route details'
+            : 'Extracting job details',
           `Extracting structured fields from ${item.sourceName}.`,
           'info',
           'running',
@@ -772,7 +922,13 @@ export function SessionPage() {
         upsertResult(item);
         if (!event.payload?.cacheHit) {
           addTimelineEvent(
-            sessionType === SearchType.SCHOLARSHIP ? 'Scholarship card ready' : 'Job card ready',
+            sessionType === SearchType.SCHOLARSHIP
+              ? 'Scholarship card ready'
+              : sessionType === SearchType.GRANT
+              ? 'Grant card ready'
+              : sessionType === SearchType.VISA
+              ? 'Visa route ready'
+              : 'Job card ready',
             `${item.title} is ready from ${item.sourceName}.`,
             'success',
             'completed',
@@ -788,6 +944,10 @@ export function SessionPage() {
           'Source extraction failed',
           sessionType === SearchType.SCHOLARSHIP
             ? `Could not extract a usable scholarship listing for ${item.title}.`
+            : sessionType === SearchType.GRANT
+            ? `Could not extract a usable grant listing for ${item.title}.`
+            : sessionType === SearchType.VISA
+            ? `Could not extract a usable visa route for ${item.title}.`
             : `Could not extract full details for ${item.title}.`,
           'warning',
           'failed',
@@ -812,6 +972,18 @@ export function SessionPage() {
           );
           return;
         }
+        if (sessionType === SearchType.GRANT) {
+          const stage = String(event.payload?.stage || '').toLowerCase();
+          addTimelineEvent(
+            stage === 'discovery' ? 'Grant shortlist ready' : 'Grant extraction progress',
+            stage === 'discovery'
+              ? formatGrantDiscoverySummary(metrics)
+              : formatGrantExtractionSummary(metrics, { ready, failed, queued }),
+            'info',
+            'running',
+          );
+          return;
+        }
         addTimelineEvent('Search progress', `${ready} ready • ${failed} failed`, 'info', 'running');
         return;
       }
@@ -820,9 +992,15 @@ export function SessionPage() {
         setCacheState((prev) => (prev ? { ...prev, refreshing: false } : null));
         const metrics = (event.payload?.metrics || null) as SearchRunMetrics | null;
         if (event.runId) {
-          void (sessionType === SearchType.SCHOLARSHIP
-            ? getScholarshipSearchRunSnapshot(event.runId, accessToken)
-            : getJobSearchRunSnapshot(event.runId, accessToken))
+          void (
+            sessionType === SearchType.SCHOLARSHIP
+              ? getScholarshipSearchRunSnapshot(event.runId, accessToken)
+              : sessionType === SearchType.GRANT
+              ? getGrantSearchRunSnapshot(event.runId, accessToken)
+              : sessionType === SearchType.VISA
+              ? getVisaSearchRunSnapshot(event.runId, accessToken)
+              : getJobSearchRunSnapshot(event.runId, accessToken)
+          )
             .then((snapshot) => {
               applySnapshot(snapshot);
               finalizeRunState(
@@ -831,6 +1009,8 @@ export function SessionPage() {
                 'Search completed',
                 sessionType === SearchType.SCHOLARSHIP
                   ? formatScholarshipCompletionSummary((snapshot?.metrics || metrics) as SearchRunMetrics | null)
+                  : sessionType === SearchType.GRANT
+                  ? formatGrantCompletionSummary((snapshot?.metrics || metrics) as SearchRunMetrics | null)
                   : 'Queue finished and results are now stable.',
                 'success',
               );
@@ -842,6 +1022,8 @@ export function SessionPage() {
                 'Search completed',
                 sessionType === SearchType.SCHOLARSHIP
                   ? formatScholarshipCompletionSummary(metrics)
+                  : sessionType === SearchType.GRANT
+                  ? formatGrantCompletionSummary(metrics)
                   : 'Queue finished and results are now stable.',
                 'success',
               );
@@ -854,6 +1036,8 @@ export function SessionPage() {
           'Search completed',
           sessionType === SearchType.SCHOLARSHIP
             ? formatScholarshipCompletionSummary(metrics)
+            : sessionType === SearchType.GRANT
+            ? formatGrantCompletionSummary(metrics)
             : 'Queue finished and results are now stable.',
           'success',
         );
@@ -886,7 +1070,14 @@ export function SessionPage() {
   const connectToRunStream = React.useCallback(
     (searchRunId: string) => {
       closeStream();
-      const streamFactory = sessionType === SearchType.SCHOLARSHIP ? connectScholarshipSearchRunStream : connectJobSearchRunStream;
+      const streamFactory =
+        sessionType === SearchType.SCHOLARSHIP
+          ? connectScholarshipSearchRunStream
+          : sessionType === SearchType.GRANT
+          ? connectGrantSearchRunStream
+          : sessionType === SearchType.VISA
+          ? connectVisaSearchRunStream
+          : connectJobSearchRunStream;
       streamRef.current = streamFactory({
         runId: searchRunId,
         token: accessToken,
@@ -925,6 +1116,10 @@ export function SessionPage() {
           const snapshot =
             sessionType === SearchType.SCHOLARSHIP
               ? await getScholarshipSearchRunSnapshot(searchRunId, accessToken)
+              : sessionType === SearchType.GRANT
+              ? await getGrantSearchRunSnapshot(searchRunId, accessToken)
+              : sessionType === SearchType.VISA
+              ? await getVisaSearchRunSnapshot(searchRunId, accessToken)
               : await getJobSearchRunSnapshot(searchRunId, accessToken);
           applySnapshot(snapshot);
         } catch (error) {
@@ -973,6 +1168,11 @@ export function SessionPage() {
         return;
       }
       const message = error instanceof Error ? error.message : 'Search run could not be started.';
+      if (error instanceof ApiPaymentRequiredError) {
+        setBillingLimitError((error.payload || null) as BillingLimitError | null);
+      } else {
+        setBillingLimitError(null);
+      }
       setResults([]);
       setCacheState(null);
       setStatus('error');
@@ -1006,6 +1206,7 @@ export function SessionPage() {
     setSessionType(nextSessionType);
     setSessionFormData(nextFormData);
     setSelectedJobId(null);
+    setBillingLimitError(null);
     lastSnapshotStatusRef.current = null;
     lastSnapshotCountsRef.current = shouldReplacePersisted ? { ready: 0, failed: 0, queued: 0 } : countResultsByQueueStatus(persisted?.results || []);
     lastSequenceRef.current = shouldReplacePersisted ? 0 : Number(persisted?.lastSequence || 0);
@@ -1125,7 +1326,13 @@ export function SessionPage() {
       try {
         const saved = await listSavedOpportunities(
           accessToken,
-          sessionType === SearchType.SCHOLARSHIP ? 'scholarship' : sessionType === SearchType.VISA ? 'visa' : 'job',
+          sessionType === SearchType.SCHOLARSHIP
+            ? 'scholarship'
+            : sessionType === SearchType.GRANT
+            ? 'grant'
+            : sessionType === SearchType.VISA
+            ? 'visa'
+            : 'job',
         );
         if (cancelled) return;
         const nextKeys = new Set(
@@ -1170,6 +1377,7 @@ export function SessionPage() {
     lastSnapshotStatusRef.current = null;
     lastSnapshotCountsRef.current = { ready: 0, failed: 0, queued: 0 };
     setCacheState(null);
+    setBillingLimitError(null);
     const now = Date.now();
     setStartedAtMs(now);
     setElapsedTime(0);
@@ -1182,15 +1390,45 @@ export function SessionPage() {
           ? await startScholarshipSearchRun({
               token: accessToken,
               query: searchQuery,
-              maxNumResults: 10,
+              maxNumResults: 5,
               sourceScope: sessionFormData.sourceScope || 'global',
+            })
+          : sessionType === SearchType.GRANT
+          ? await startGrantSearchRun({
+              token: accessToken,
+              query: searchQuery,
+              maxNumResults: 5,
+              sourceScope: sessionFormData.sourceScope || 'global',
+              body: {
+                applicantType: sessionFormData.grantApplicantType,
+                focusArea: sessionFormData.grantFocusArea,
+                locationEligibility: sessionFormData.grantLocationEligibility,
+                minimumFunding: sessionFormData.grantMinimumFunding,
+                stage: sessionFormData.grantStage,
+                regionScope: sessionFormData.grantRegionScope,
+              },
+            })
+          : sessionType === SearchType.VISA
+          ? await startVisaSearchRun({
+              token: accessToken,
+              query: searchQuery,
+              maxNumResults: 5,
+              sourceScope: sessionFormData.sourceScope || 'global',
+              body: {
+                country: sessionFormData.visaCountry,
+                visaCategory: sessionFormData.visaCategory,
+                nationality: sessionFormData.nationality,
+                currentResidence: sessionFormData.currentResidence,
+                travelReason: sessionFormData.travelReason,
+                timeline: sessionFormData.visaTimeline,
+              },
             })
           : await startJobSearchRun({
               token: accessToken,
               query: searchQuery,
               mode: selectedJobSearchMode,
               countryCode,
-              maxNumResults: 10,
+              maxNumResults: 5,
               sourceScope: sessionFormData.sourceScope || 'global',
               remote: sessionFormData.remote,
               visaSponsorship: sessionFormData.visaSponsorship,
@@ -1209,8 +1447,20 @@ export function SessionPage() {
     searchQuery,
     selectedJobSearchMode,
     sessionType,
+    sessionFormData.currentResidence,
+    sessionFormData.grantApplicantType,
+    sessionFormData.grantFocusArea,
+    sessionFormData.grantLocationEligibility,
+    sessionFormData.grantMinimumFunding,
+    sessionFormData.grantRegionScope,
+    sessionFormData.grantStage,
+    sessionFormData.nationality,
     sessionFormData.remote,
     sessionFormData.sourceScope,
+    sessionFormData.travelReason,
+    sessionFormData.visaCategory,
+    sessionFormData.visaCountry,
+    sessionFormData.visaTimeline,
     sessionFormData.visaSponsorship,
   ]);
 
@@ -1229,6 +1479,10 @@ export function SessionPage() {
       const snapshot =
         sessionType === SearchType.SCHOLARSHIP
           ? await getScholarshipSearchRunSnapshot(runId, accessToken)
+          : sessionType === SearchType.GRANT
+          ? await getGrantSearchRunSnapshot(runId, accessToken)
+          : sessionType === SearchType.VISA
+          ? await getVisaSearchRunSnapshot(runId, accessToken)
           : await getJobSearchRunSnapshot(runId, accessToken);
       if (!snapshot) {
         isCompletedRef.current = true;
@@ -1338,6 +1592,10 @@ export function SessionPage() {
         const snapshot =
           sessionType === SearchType.SCHOLARSHIP
             ? await getScholarshipSearchRunSnapshot(runId, accessToken)
+            : sessionType === SearchType.GRANT
+            ? await getGrantSearchRunSnapshot(runId, accessToken)
+            : sessionType === SearchType.VISA
+            ? await getVisaSearchRunSnapshot(runId, accessToken)
             : await getJobSearchRunSnapshot(runId, accessToken);
         applySnapshot(snapshot);
         connectToRunStream(runId);
@@ -1355,6 +1613,10 @@ export function SessionPage() {
       try {
         if (sessionType === SearchType.SCHOLARSHIP) {
           await stopScholarshipSearchRun(runId, accessToken);
+        } else if (sessionType === SearchType.GRANT) {
+          await stopGrantSearchRun(runId, accessToken);
+        } else if (sessionType === SearchType.VISA) {
+          await stopVisaSearchRun(runId, accessToken);
         } else {
           await stopJobSearchRun(runId, accessToken);
         }
@@ -1385,7 +1647,13 @@ export function SessionPage() {
       const saved = await saveOpportunity(
         accessToken,
         result,
-        sessionType === SearchType.SCHOLARSHIP ? 'scholarship' : sessionType === SearchType.VISA ? 'visa' : 'job',
+        sessionType === SearchType.SCHOLARSHIP
+          ? 'scholarship'
+          : sessionType === SearchType.GRANT
+          ? 'grant'
+          : sessionType === SearchType.VISA
+          ? 'visa'
+          : 'job',
       );
         const savedKey = resultIdentity({
           link: saved.link || result.link,
@@ -1417,6 +1685,30 @@ export function SessionPage() {
       }
     },
     [accessToken, addTimelineEvent, markResultStatus, redirectToAuth, savedJobKeys, savingJobIds, sessionType],
+  );
+
+  const handleUpgradeCheckout = React.useCallback(
+    async (planKey: 'pro_weekly' | 'pro_monthly', currency: 'NGN' | 'USD') => {
+      setBillingCheckoutKey(`${planKey}:${currency}`);
+      try {
+        const checkout = await createBillingCheckoutSession({
+          token: accessToken,
+          planKey,
+          currency,
+        });
+        window.location.href = checkout.url;
+      } catch (error) {
+        if (error instanceof ApiUnauthorizedError) {
+          redirectToAuth();
+          return;
+        }
+        const message = error instanceof Error ? error.message : 'Could not open checkout right now.';
+        addTimelineEvent('Upgrade unavailable', message, 'error', 'failed');
+      } finally {
+        setBillingCheckoutKey(null);
+      }
+    },
+    [accessToken, addTimelineEvent, redirectToAuth],
   );
 
   const isSearching = (status === 'running' || status === 'paused') && !isCompletedRef.current;
@@ -1501,6 +1793,20 @@ export function SessionPage() {
           { name: 'DAAD', status: isSearching ? 'Searching' : 'Completed' },
         ];
       }
+      if (sessionType === SearchType.GRANT) {
+        return [
+          { name: 'Grants.gov', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'Wellcome', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'Echoing Green', status: isSearching ? 'Searching' : 'Completed' },
+        ];
+      }
+      if (sessionType === SearchType.VISA) {
+        return [
+          { name: 'Canada IRCC', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'GOV.UK', status: isSearching ? 'Searching' : 'Completed' },
+          { name: 'Make it in Germany', status: isSearching ? 'Searching' : 'Completed' },
+        ];
+      }
       if (selectedJobSearchMode === 'curated') {
         return [
           { name: 'We Work Remotely', status: isSearching ? 'Searching' : 'Completed' },
@@ -1522,6 +1828,10 @@ export function SessionPage() {
     const catalog =
       sessionType === SearchType.SCHOLARSHIP
         ? SCHOLARSHIP_SOURCE_CATALOG
+        : sessionType === SearchType.GRANT
+        ? GRANT_SOURCE_CATALOG
+        : sessionType === SearchType.VISA
+        ? VISA_SOURCE_CATALOG
         : selectedJobSearchMode === 'curated'
         ? DEFAULT_SOURCE_CATALOG
         : WIDE_SOURCE_CATALOG;
@@ -1634,6 +1944,61 @@ export function SessionPage() {
           </div>
         </div>
       </div>
+
+      {billingLimitError && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-amber-800">
+                <Crown size={13} />
+                Daily search limit reached
+              </div>
+              <h2 className="mt-4 text-xl font-bold text-neutral-950">
+                You&apos;ve used {billingLimitError.used} live search{billingLimitError.used === 1 ? '' : 'es'} today.
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-neutral-600">
+                Free access allows {billingLimitError.limit} live backend search runs per UTC day. Upgrade to Pro for unlimited live searches, or wait until{' '}
+                {new Date(billingLimitError.resetAt).toLocaleString()} for the reset.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => navigate('/profile')}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm font-bold text-amber-900 transition-all hover:bg-amber-100"
+            >
+              Open billing
+              <ExternalLink size={14} />
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {billingLimitError.upgradeOptions.map((option) => (
+              <div key={`${option.planKey}:${option.currency}`} className="rounded-2xl border border-amber-200 bg-white p-4">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-800">
+                  {option.provider === 'paystack' ? 'Paystack' : 'Polar'} • {option.currency}
+                </p>
+                <h3 className="mt-3 text-lg font-bold text-neutral-950">{option.label}</h3>
+                <p className="mt-1 text-sm text-neutral-500">{option.interval} billing</p>
+                <p className="mt-4 text-2xl font-bold text-neutral-950">{option.priceLabel}</p>
+                <button
+                  type="button"
+                  onClick={() => void handleUpgradeCheckout(option.planKey, option.currency)}
+                  disabled={Boolean(billingCheckoutKey)}
+                  className="mt-5 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-black disabled:opacity-60"
+                >
+                  {billingCheckoutKey === `${option.planKey}:${option.currency}` ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Crown size={16} />
+                  )}
+                  Upgrade
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
         <div className="lg:col-span-3 space-y-6">
@@ -2149,6 +2514,7 @@ export function SessionPage() {
                 visibleResults.map((result) => {
                   const isSaved = savedJobKeys.has(resultIdentity(result));
                   const isSaving = savingJobIds.has(result.id);
+                  const primaryLink = result.officialApplicationLink || result.link || '#';
 
                   return (
                     <motion.div
@@ -2179,6 +2545,25 @@ export function SessionPage() {
                         {result.opportunityType === SearchType.SCHOLARSHIP && (result.deadline || result.studyLevel || result.fundingType) && (
                           <p className="text-xs text-neutral-500 mt-1">
                             {[result.deadline ? `Deadline ${result.deadline}` : null, result.studyLevel, result.fundingType]
+                              .filter((value): value is string => Boolean(value))
+                              .join(' • ')}
+                          </p>
+                        )}
+                        {result.opportunityType === SearchType.GRANT && (result.fundingAmount || result.deadline || result.whoCanApply || result.locationEligibility) && (
+                          <p className="text-xs text-neutral-500 mt-1">
+                            {[
+                              result.fundingAmount ? `Funding ${result.fundingAmount}` : null,
+                              result.deadline ? `Deadline ${result.deadline}` : null,
+                              result.whoCanApply,
+                              result.locationEligibility,
+                            ]
+                              .filter((value): value is string => Boolean(value))
+                              .join(' • ')}
+                          </p>
+                        )}
+                        {result.opportunityType === SearchType.VISA && (result.location || result.processingTime || result.whoCanApply) && (
+                          <p className="text-xs text-neutral-500 mt-1">
+                            {[result.location, result.processingTime ? `Processing ${result.processingTime}` : null, result.whoCanApply]
                               .filter((value): value is string => Boolean(value))
                               .join(' • ')}
                           </p>
@@ -2231,12 +2616,16 @@ export function SessionPage() {
                         </button>
                       </div>
                       <a
-                        href={result.link || '#'}
+                        href={primaryLink}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 text-neutral-900 rounded-lg text-xs font-bold hover:bg-neutral-200 transition-all min-h-[40px]"
                       >
-                        Open Link
+                        {result.opportunityType === SearchType.GRANT
+                          ? 'Apply'
+                          : result.opportunityType === SearchType.VISA
+                          ? 'Official Link'
+                          : 'Open Link'}
                         <ExternalLink size={12} />
                       </a>
                     </div>

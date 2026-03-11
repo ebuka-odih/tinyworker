@@ -1,3 +1,10 @@
+function createSearchQuota() {
+  return {
+    consumeRunAllowance: jest.fn().mockResolvedValue({ consumed: false, usageDate: new Date('2026-03-08T00:00:00.000Z') }),
+    releaseConsumedRunAllowance: jest.fn().mockResolvedValue(undefined),
+  }
+}
+
 describe('JobSearchOrchestrator cache behavior', () => {
   const originalTimeout = process.env.JOB_SEARCH_RUN_TIMEOUT_MS
 
@@ -50,7 +57,7 @@ describe('JobSearchOrchestrator cache behavior', () => {
     const runStore = createRunStore()
     runStore.findActiveRunByIntentHash.mockReturnValue({ runId: 'existing-run' })
 
-    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
     const run = await orchestrator.startRun({
       query: 'Backend Engineer OR Platform Engineer remote',
       maxNumResults: 10,
@@ -94,7 +101,7 @@ describe('JobSearchOrchestrator cache behavior', () => {
         upsert: jest.fn(),
       },
     }
-    const orchestrator = new JobSearchOrchestrator(prisma as any, {} as any, createRunStore() as any)
+    const orchestrator = new JobSearchOrchestrator(prisma as any, {} as any, createRunStore() as any, createSearchQuota() as any)
 
     const cached = await orchestrator.getCachedSearchResults({
       query: 'platform engineer OR backend engineer',
@@ -148,7 +155,7 @@ describe('JobSearchOrchestrator cache behavior', () => {
     }
     const runStore = createRunStore()
 
-    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
 
     await orchestrator.startRun({
       query: 'backend engineer',
@@ -249,7 +256,7 @@ describe('JobSearchOrchestrator timeout handling', () => {
       getEventsSince: jest.fn(),
     }
 
-    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
 
     await orchestrator.startRun({
       query: 'ai engineer',
@@ -327,7 +334,7 @@ describe('JobSearchOrchestrator timeout handling', () => {
       getEventsSince: jest.fn(),
     }
 
-    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
 
     await orchestrator.startRun({
       query: 'backend engineer',
@@ -425,7 +432,7 @@ describe('JobSearchOrchestrator heavy-site extraction', () => {
       getEventsSince: jest.fn(),
     }
 
-    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
     await orchestrator.startRun({
       query: 'backend engineer',
       maxNumResults: 1,
@@ -507,7 +514,7 @@ describe('JobSearchOrchestrator default-search Valyu content extraction', () => 
       getEventsSince: jest.fn(),
     }
 
-    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new JobSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
     await orchestrator.startRun({
       query: 'backend engineer',
       maxNumResults: 1,

@@ -1,6 +1,7 @@
 export enum SearchType {
   JOB = 'job',
   SCHOLARSHIP = 'scholarship',
+  GRANT = 'grant',
   VISA = 'visa',
 }
 
@@ -8,14 +9,75 @@ export interface SearchRunSummary {
   totalSearchesRun: number;
   jobsRun: number;
   scholarshipsRun: number;
+  grantsRun: number;
   visasRun: number;
+}
+
+export interface SearchQuota {
+  dailyLimit: number | null;
+  usedToday: number;
+  remainingToday: number | null;
+  resetAt: string;
+  unlimited: boolean;
+}
+
+export type BillingProvider = 'paystack' | 'polar';
+export type BillingCurrency = 'NGN' | 'USD';
+export type BillingPlanKey = 'pro_weekly' | 'pro_monthly';
+
+export interface BillingPlan {
+  planKey: BillingPlanKey;
+  provider: BillingProvider;
+  currency: BillingCurrency;
+  interval: 'weekly' | 'monthly';
+  amountMinor: number;
+  priceLabel: string;
+  label: string;
+}
+
+export interface BillingCurrentSubscription {
+  id: string;
+  subscriptionTier: 'free' | 'pro';
+  billingStatus: string;
+  provider: BillingProvider;
+  interval: string;
+  currency: string;
+  amountMinor: number;
+  amountLabel: string;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+  cancelAtPeriodEnd: boolean;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface BillingSummary {
+  enabled: boolean;
+  currentSubscription: BillingCurrentSubscription | null;
+  searchQuota: SearchQuota;
+  availablePlans: BillingPlan[];
+}
+
+export interface BillingLimitError {
+  error?: string;
+  code: 'daily_limit_reached';
+  limit: number;
+  used: number;
+  remaining: number;
+  resetAt: string;
+  upgradeOptions: BillingPlan[];
 }
 
 export interface AuthUser {
   userId: string;
   email: string;
-  subscriptionTier?: string;
-  isPro?: boolean;
+  subscriptionTier: 'free' | 'pro';
+  billingStatus: string;
+  billingProvider?: string | null;
+  billingInterval?: string | null;
+  billingCurrency?: string | null;
+  billingCurrentPeriodEnd?: string | null;
+  cancelAtPeriodEnd?: boolean;
+  searchQuota: SearchQuota;
   searchRunSummary: SearchRunSummary;
 }
 
@@ -81,10 +143,16 @@ export interface SearchResult {
   postedDate?: string;
   studyLevel?: string;
   fundingType?: string;
+  fundingAmount?: string;
+  whoCanApply?: string;
+  locationEligibility?: string;
+  officialApplicationLink?: string;
+  processingTime?: string;
   matchReason?: string;
   requirements?: string[];
   responsibilities?: string[];
   benefits?: string[];
+  metadata?: Record<string, unknown> | null;
   seenOn?: Array<{
     sourceName: string;
     sourceDomain: string;
@@ -94,7 +162,7 @@ export interface SearchResult {
 
 export interface SavedOpportunity {
   id: string;
-  type: 'job' | 'scholarship' | 'visa';
+  type: 'job' | 'scholarship' | 'grant' | 'visa';
   title: string;
   organization?: string | null;
   location?: string | null;
@@ -104,6 +172,7 @@ export interface SavedOpportunity {
   deadline?: string | null;
   matchScore?: number | null;
   source?: string | null;
+  metadata?: Record<string, unknown> | null;
   createdAt?: string;
   updatedAt?: string;
 }

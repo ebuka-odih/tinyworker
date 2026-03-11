@@ -1,22 +1,37 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
+import { BillingService } from '../billing/billing.service'
+import { SearchQuotaService, SearchQuotaSnapshot } from '../billing/search-quota.service'
 
 export type UserSearchRunSummary = {
   totalSearchesRun: number
   jobsRun: number
   scholarshipsRun: number
+  grantsRun: number
   visasRun: number
 }
 
 export type AuthenticatedUserSummary = {
   userId: string
   email: string
+  subscriptionTier: 'free' | 'pro'
+  billingStatus: string
+  billingProvider: string | null
+  billingInterval: string | null
+  billingCurrency: string | null
+  billingCurrentPeriodEnd: string | null
+  cancelAtPeriodEnd: boolean
+  searchQuota: SearchQuotaSnapshot
   searchRunSummary: UserSearchRunSummary
 }
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private billingService: BillingService,
+    private searchQuotaService: SearchQuotaService,
+  ) {}
 
   async findByEmail(email: string) {
     return this.prisma.user.findUnique({ where: { email } })
@@ -38,20 +53,32 @@ export class UsersService {
     })
     if (!user) throw new NotFoundException('User not found')
 
-    const [totalSearchesRun, jobsRun, scholarshipsRun, visasRun] = await Promise.all([
+    const [totalSearchesRun, jobsRun, scholarshipsRun, grantsRun, visasRun, billing, searchQuota] = await Promise.all([
       this.prisma.jobSearchRun.count({ where: { userId: user.id } }),
       this.prisma.jobSearchRun.count({ where: { userId: user.id, runKind: 'job' } }),
       this.prisma.jobSearchRun.count({ where: { userId: user.id, runKind: 'scholarship' } }),
+      this.prisma.jobSearchRun.count({ where: { userId: user.id, runKind: 'grant' } }),
       this.prisma.jobSearchRun.count({ where: { userId: user.id, runKind: 'visa' } }),
+      this.billingService.getBillingSnapshot(user.id),
+      this.searchQuotaService.getQuotaSnapshot(user.id),
     ])
 
     return {
       userId: user.id,
       email: user.email,
+      subscriptionTier: billing.subscriptionTier,
+      billingStatus: billing.billingStatus,
+      billingProvider: billing.provider,
+      billingInterval: billing.interval,
+      billingCurrency: billing.currency,
+      billingCurrentPeriodEnd: billing.currentPeriodEnd,
+      cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
+      searchQuota,
       searchRunSummary: {
         totalSearchesRun,
         jobsRun,
         scholarshipsRun,
+        grantsRun,
         visasRun,
       },
     }

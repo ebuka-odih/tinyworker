@@ -1,6 +1,8 @@
 import { SearchRunResultItem } from './job-search-run.store'
 import {
+  filterAndDeduplicateGrantCandidates,
   filterAndDeduplicateScholarshipCandidates,
+  filterAndDeduplicateVisaCandidates,
   deduplicateReadyResults,
   deriveCandidateJobDetails,
   extractedTitleLooksValid,
@@ -270,6 +272,66 @@ describe('job-search candidate utils', () => {
 
     expect(filtered).toHaveLength(1)
     expect(filtered[0]?.id).toBe('commonwealth-detail')
+  })
+
+  it('filters grant advice pages while keeping likely grant detail pages', () => {
+    const filtered = filterAndDeduplicateGrantCandidates([
+      {
+        id: 'grant-advice',
+        title: 'How to Apply for Startup Grants in 2026',
+        url: 'https://www2.fundsforngos.org/how-to-apply/startup-grants/',
+        snippet: 'Advice article.',
+        relevance: 0.91,
+        sourceName: 'Funds for NGOs',
+        sourceDomain: 'www2.fundsforngos.org',
+        sourceType: 'job_board',
+        sourceVerified: true,
+      },
+      {
+        id: 'grant-detail',
+        title: 'AI Innovation Grant 2026',
+        url: 'https://wellcome.org/grant-funding/ai-innovation-grant-2026',
+        snippet: 'Open call for AI innovation grant funding.',
+        relevance: 0.94,
+        sourceName: 'Wellcome',
+        sourceDomain: 'wellcome.org',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+    ])
+
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.id).toBe('grant-detail')
+  })
+
+  it('filters visa advice pages while keeping official route pages', () => {
+    const filtered = filterAndDeduplicateVisaCandidates([
+      {
+        id: 'visa-advice',
+        title: 'Find out if you need a visa to visit the UK',
+        url: 'https://www.gov.uk/check-uk-visa',
+        snippet: 'Tool page',
+        relevance: 0.88,
+        sourceName: 'GOV.UK',
+        sourceDomain: 'gov.uk',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+      {
+        id: 'visa-detail',
+        title: 'Skilled Worker visa',
+        url: 'https://www.gov.uk/skilled-worker-visa',
+        snippet: 'Official work visa route page.',
+        relevance: 0.95,
+        sourceName: 'GOV.UK',
+        sourceDomain: 'gov.uk',
+        sourceType: 'company_careers',
+        sourceVerified: true,
+      },
+    ])
+
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.id).toBe('visa-detail')
   })
 
   it('rejects scholarship utility pages and collapses same-family scholarship siblings', () => {

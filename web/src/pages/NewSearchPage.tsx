@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Briefcase, Clock3, FileText, GraduationCap, Layers3, Search } from 'lucide-react';
+import { ArrowRight, Briefcase, Clock3, FileText, GraduationCap, HandCoins, Layers3, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 
 import { useAuth } from '../auth/AuthContext';
@@ -31,12 +31,22 @@ const searchTypeCards = [
     icon: GraduationCap,
   },
   {
+    type: SearchType.GRANT,
+    title: 'Grants',
+    description:
+      'Build a grant search profile around your funding goals, applicant type, focus area, and eligible regions before running a live search.',
+    meta: 'Guided setup • Estimated time: 3–6 min',
+    badge: 'Live results',
+    cta: 'Start grant search',
+    icon: HandCoins,
+  },
+  {
     type: SearchType.VISA,
     title: 'Visa Requirements',
     description:
-      'Build a visa guidance profile with your target country, visa path, and relocation context so you can save and review the right checklist.',
+      'Build a visa guidance profile with your target country, visa path, and relocation context before running a live official-source search.',
     meta: 'Guided setup • Estimated time: 2–4 min',
-    badge: 'Structured flow',
+    badge: 'Live results',
     cta: 'Check visa path',
     icon: FileText,
   },
@@ -56,6 +66,7 @@ function formatRelativeTime(updatedAt: number): string {
 
 function getSearchTypeLabel(type: SearchType): string {
   if (type === SearchType.SCHOLARSHIP) return 'Scholarship';
+  if (type === SearchType.GRANT) return 'Grant';
   if (type === SearchType.VISA) return 'Visa';
   return 'Job';
 }
@@ -63,6 +74,9 @@ function getSearchTypeLabel(type: SearchType): string {
 function getRecentSearchTitle(recent: RecentSearchSummary): string {
   if (recent.type === SearchType.SCHOLARSHIP) {
     return recent.formData.scholarshipQuery || 'Scholarship search';
+  }
+  if (recent.type === SearchType.GRANT) {
+    return recent.formData.grantQuery || 'Grant search';
   }
   if (recent.type === SearchType.VISA) {
     return recent.formData.visaCountry ? `${recent.formData.visaCountry} visa requirements` : 'Visa requirement search';
@@ -75,6 +89,11 @@ function getRecentSearchSubtitle(recent: RecentSearchSummary): string {
     return [recent.formData.destinationRegion, recent.formData.studyLevel, recent.formData.fundingType]
       .filter(Boolean)
       .join(' • ') || 'Scholarship criteria';
+  }
+  if (recent.type === SearchType.GRANT) {
+    return [recent.formData.grantApplicantType, recent.formData.grantFocusArea, recent.formData.grantLocationEligibility]
+      .filter(Boolean)
+      .join(' • ') || 'Grant criteria';
   }
   if (recent.type === SearchType.VISA) {
     return [recent.formData.visaCategory, recent.formData.nationality, recent.formData.currentResidence]
@@ -91,7 +110,7 @@ function getRecentSearchSubtitle(recent: RecentSearchSummary): string {
 }
 
 function renderRecentActionLabel(recent: RecentSearchSummary): string {
-  return recent.type === SearchType.JOB ? 'Open results' : 'Continue setup';
+  return recent.type === SearchType.SCHOLARSHIP ? 'Continue setup' : 'Open results';
 }
 
 export function NewSearchPage() {
@@ -103,7 +122,7 @@ export function NewSearchPage() {
 
   const openRecent = React.useCallback(
     (recent: RecentSearchSummary) => {
-      if (recent.type === SearchType.JOB) {
+      if (recent.type !== SearchType.SCHOLARSHIP) {
         navigate(`/session/${recent.sessionId}`);
         return;
       }
@@ -144,7 +163,7 @@ export function NewSearchPage() {
               Choose what you want to search for
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-neutral-500 md:text-base">
-              TinyFinder helps you search jobs, scholarships, and visa requirements through guided flows that organize
+              TinyFinder helps you search jobs, scholarships, grants, and visa requirements through guided flows that organize
               your criteria before scanning relevant public sources.
             </p>
             <p className="mt-4 text-sm leading-7 text-neutral-500">
@@ -175,11 +194,10 @@ export function NewSearchPage() {
       {activeTab === 'new' ? (
         <>
           <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-sm">
-            Jobs can run live now. Scholarship and visa flows start with structured criteria you can save, refine, and
-            reuse.
+            Jobs, scholarships, grants, and visa requirements can all run live now.
           </div>
 
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-4">
             {searchTypeCards.map((card, index) => (
               <motion.button
                 key={card.type}
@@ -224,7 +242,7 @@ export function NewSearchPage() {
             <div>
               <h2 className="text-lg font-bold text-neutral-900">Saved search setups and results</h2>
               <p className="text-sm text-neutral-500">
-                Reopen live job results or reuse saved scholarship and visa criteria without starting from scratch.
+                Reopen live job, grant, and visa results or reuse saved scholarship criteria without starting from scratch.
               </p>
             </div>
             <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">{recentSearches.length} saved</span>
@@ -237,7 +255,7 @@ export function NewSearchPage() {
               </div>
               <h3 className="mt-4 text-lg font-bold text-neutral-900">No recent searches yet</h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-7 text-neutral-500">
-                Start a job, scholarship, or visa search flow. Once you complete a setup or run, it will appear here
+                Start a job, scholarship, grant, or visa search flow. Once you complete a setup or run, it will appear here
                 for quick reuse.
               </p>
               <button

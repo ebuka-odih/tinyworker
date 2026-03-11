@@ -13,6 +13,7 @@ import { ApplicationsModule } from './applications/applications.module'
 import { DocumentsModule } from './documents/documents.module'
 import { TelegramModule } from './telegram/telegram.module'
 import { IntentModule } from './intent/intent.module'
+import { BillingModule } from './billing/billing.module'
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { IntentModule } from './intent/intent.module'
     DocumentsModule,
     TelegramModule,
     IntentModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

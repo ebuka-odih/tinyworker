@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { rankSearchRunResults, readyResultScore, searchRunResultIdentityKey } from './job-search-candidate.utils'
 
 export type SearchRunStatus = 'running' | 'completed' | 'failed' | 'stopped'
-export type SearchRunKind = 'job' | 'scholarship' | 'visa'
+export type SearchRunKind = 'job' | 'scholarship' | 'grant' | 'visa'
 export type SearchRunEventType =
   | 'run_started'
   | 'run_cache_hit'
@@ -29,7 +29,7 @@ export type SearchRunEvent = {
 
 export type SearchRunResultItem = {
   id: string
-  opportunityType?: 'job' | 'scholarship' | 'visa'
+  opportunityType?: 'job' | 'scholarship' | 'grant' | 'visa'
   title: string
   organization: string
   location: string
@@ -52,11 +52,17 @@ export type SearchRunResultItem = {
   postedDate?: string
   studyLevel?: string
   fundingType?: string
+  fundingAmount?: string
+  whoCanApply?: string
+  locationEligibility?: string
+  officialApplicationLink?: string
+  processingTime?: string
   matchReason?: string
   requirements?: string[]
   responsibilities?: string[]
   benefits?: string[]
   isSuspicious?: boolean
+  metadata?: Record<string, any> | null
   seenOn?: Array<{
     sourceName: string
     sourceDomain: string

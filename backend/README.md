@@ -25,6 +25,14 @@ npm run start:dev
 - POST `/api/auth/register`
 - POST `/api/auth/login`
 - GET `/api/auth/me`
+- GET `/api/billing/summary`
+- POST `/api/billing/checkout-sessions`
+- GET `/api/billing/customer-portal`
+- POST `/api/billing/subscriptions/:id/cancel`
+- POST `/api/billing/subscriptions/:id/resume`
+- GET `/api/billing/paystack/callback`
+- POST `/api/billing/webhooks/paystack`
+- POST `/api/billing/webhooks/polar`
 - GET `/api/cv`
 - POST `/api/cv/upload`
 - POST `/api/cv/import-linkedin` (starts async job)
@@ -53,6 +61,14 @@ npm run start:dev
 
 ## Environment
 See `.env.example` for required variables.
+
+Billing-specific configuration:
+- `BILLING_ENABLED` enables quota enforcement and billing surfaces
+- `BILLING_APP_BASE_URL` is the frontend base URL used for checkout success/cancel redirects
+- `BILLING_API_BASE_URL` is the public backend base URL used for Paystack callbacks
+- `FREE_DAILY_SEARCH_LIMIT` controls the free live-search quota
+- `PAYSTACK_*` keys configure NGN weekly/monthly plans
+- `POLAR_*` keys configure USD weekly/monthly products and webhook validation
 
 For LinkedIn profile import reliability, TinyFish is configured to use `stealth` profile and proxy by default:
 - `TINYFISH_LINKEDIN_BROWSER_PROFILE` (`stealth` recommended)

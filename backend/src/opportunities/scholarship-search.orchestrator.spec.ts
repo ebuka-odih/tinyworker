@@ -52,6 +52,13 @@ describe('ScholarshipSearchOrchestrator run creation', () => {
     }
   }
 
+  function createSearchQuota() {
+    return {
+      consumeRunAllowance: jest.fn().mockResolvedValue({ consumed: false, usageDate: new Date('2026-03-08T00:00:00.000Z') }),
+      releaseConsumedRunAllowance: jest.fn().mockResolvedValue(undefined),
+    }
+  }
+
   it('creates a persisted scholarship run only when a new run actually starts', async () => {
     const { ScholarshipSearchOrchestrator } = require('./scholarship-search.orchestrator')
 
@@ -66,7 +73,7 @@ describe('ScholarshipSearchOrchestrator run creation', () => {
     }
     const runStore = createRunStore()
 
-    const orchestrator = new ScholarshipSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new ScholarshipSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
 
     await orchestrator.startRun({
       userId: 'user-1',
@@ -193,7 +200,7 @@ describe('ScholarshipSearchOrchestrator run creation', () => {
       },
     })
 
-    const orchestrator = new ScholarshipSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new ScholarshipSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
 
     await orchestrator.startRun({
       userId: 'user-1',
@@ -277,7 +284,7 @@ describe('ScholarshipSearchOrchestrator run creation', () => {
       },
     })
 
-    const orchestrator = new ScholarshipSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any)
+    const orchestrator = new ScholarshipSearchOrchestrator(prisma as any, valyuSearch as any, runStore as any, createSearchQuota() as any)
 
     await orchestrator.startRun({
       userId: 'user-1',

@@ -20,6 +20,9 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
   if (!job) return null;
 
   const isScholarship = job.opportunityType === 'scholarship';
+  const isGrant = job.opportunityType === 'grant';
+  const isVisa = job.opportunityType === 'visa';
+  const itemLabel = isScholarship ? 'scholarship' : isGrant ? 'grant' : isVisa ? 'visa route' : 'job';
 
   const hasFullDetails = Boolean(
     job.matchReason ||
@@ -30,6 +33,10 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
       job.deadline ||
       job.studyLevel ||
       job.fundingType ||
+      job.fundingAmount ||
+      job.whoCanApply ||
+      job.locationEligibility ||
+      job.processingTime ||
       job.requirements?.length ||
       job.responsibilities?.length ||
       job.benefits?.length,
@@ -87,10 +94,10 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
           {!isReady && (
             <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
               <h4 className="text-sm font-bold text-amber-900">Details still loading</h4>
-            <p className="mt-1 text-sm text-amber-800 leading-relaxed">
-              {job.queueStatus === 'failed'
-                  ? `Full extraction did not complete for this ${isScholarship ? 'scholarship' : 'job'}. You can still review the source listing and any partial details below.`
-                  : `This ${isScholarship ? 'scholarship' : 'job'} is still being processed. Available source details are shown now, and richer extracted fields will appear once the run finishes.`}
+              <p className="mt-1 text-sm text-amber-800 leading-relaxed">
+                {job.queueStatus === 'failed'
+                  ? `Full extraction did not complete for this ${itemLabel}. You can still review the source listing and any partial details below.`
+                  : `This ${itemLabel} is still being processed. Available source details are shown now, and richer extracted fields will appear once the run finishes.`}
               </p>
             </section>
           )}
@@ -98,16 +105,54 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Detail label="Fit" value={`${job.fitScore} Fit`} />
             <Detail label="Queue Status" value={queueLabel(job.queueStatus)} />
-            <Detail label={isScholarship ? 'Deadline' : 'Salary'} value={isScholarship ? job.deadline || 'Not stated' : job.salary || 'Not stated'} />
             <Detail
-              label={isScholarship ? 'Study Level' : 'Employment'}
-              value={isScholarship ? job.studyLevel || 'Not stated' : job.employmentType || 'Not stated'}
+              label={isScholarship ? 'Deadline' : isGrant ? 'Funding Amount' : isVisa ? 'Country' : 'Salary'}
+              value={
+                isScholarship
+                  ? job.deadline || 'Not stated'
+                  : isGrant
+                  ? job.fundingAmount || 'Not stated'
+                  : isVisa
+                  ? job.location || 'Not stated'
+                  : job.salary || 'Not stated'
+              }
             />
             <Detail
-              label={isScholarship ? 'Funding' : 'Work Mode'}
-              value={isScholarship ? job.fundingType || 'Not stated' : job.workMode || 'Not stated'}
+              label={isScholarship ? 'Study Level' : isGrant ? 'Who Can Apply' : isVisa ? 'Processing Time' : 'Employment'}
+              value={
+                isScholarship
+                  ? job.studyLevel || 'Not stated'
+                  : isGrant
+                  ? job.whoCanApply || 'Not stated'
+                  : isVisa
+                  ? job.processingTime || 'Not stated'
+                  : job.employmentType || 'Not stated'
+              }
             />
-            <Detail label={isScholarship ? 'Destination' : 'Posted'} value={isScholarship ? job.location || 'Not stated' : job.postedDate || 'Not stated'} />
+            <Detail
+              label={isScholarship ? 'Funding' : isGrant ? 'Eligibility Region' : isVisa ? 'Applicant Profile' : 'Work Mode'}
+              value={
+                isScholarship
+                  ? job.fundingType || 'Not stated'
+                  : isGrant
+                  ? job.locationEligibility || 'Not stated'
+                  : isVisa
+                  ? job.whoCanApply || 'Not stated'
+                  : job.workMode || 'Not stated'
+              }
+            />
+            <Detail
+              label={isScholarship ? 'Destination' : isGrant ? 'Deadline' : isVisa ? 'Official Link' : 'Posted'}
+              value={
+                isScholarship
+                  ? job.location || 'Not stated'
+                  : isGrant
+                  ? job.deadline || 'Not stated'
+                  : isVisa
+                  ? job.officialApplicationLink || 'Not stated'
+                  : job.postedDate || 'Not stated'
+              }
+            />
           </div>
 
           {job.matchReason && (
@@ -129,7 +174,7 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
               <h4 className="text-sm font-bold text-neutral-900 mb-2">Cross-source confidence</h4>
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
                 <p className="text-sm text-emerald-900 leading-relaxed">
-                  This job appeared on {job.seenOn.length} sources, which increases confidence that it is a real listing.
+                  This {itemLabel} appeared on {job.seenOn.length} sources, which increases confidence that it is a real listing.
                 </p>
                 <ul className="mt-3 space-y-1.5">
                   {job.seenOn.map((source) => (
@@ -152,19 +197,19 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
           )}
 
           <ListBlock
-            title={isScholarship ? 'Eligibility' : 'Requirements'}
+            title={isScholarship || isGrant || isVisa ? 'Eligibility' : 'Requirements'}
             items={job.requirements}
-            emptyLabel={`${isScholarship ? 'Eligibility details' : 'Requirements'} are not available for this ${isScholarship ? 'scholarship' : 'job'} yet.`}
+            emptyLabel={`${isScholarship || isGrant || isVisa ? 'Eligibility details' : 'Requirements'} are not available for this ${itemLabel} yet.`}
           />
           <ListBlock
-            title={isScholarship ? 'Application Steps' : 'Responsibilities'}
+            title={isScholarship ? 'Application Steps' : isVisa ? 'Required Documents' : 'Responsibilities'}
             items={job.responsibilities}
-            emptyLabel={`${isScholarship ? 'Application steps' : 'Responsibilities'} are not available for this ${isScholarship ? 'scholarship' : 'job'} yet.`}
+            emptyLabel={`${isScholarship ? 'Application steps' : isVisa ? 'Required documents' : 'Responsibilities'} are not available for this ${itemLabel} yet.`}
           />
           <ListBlock
-            title="Benefits"
+            title={isVisa ? 'Application Steps' : 'Benefits'}
             items={job.benefits}
-            emptyLabel={`Benefits are not available for this ${isScholarship ? 'scholarship' : 'job'} yet.`}
+            emptyLabel={`${isVisa ? 'Application steps' : 'Benefits'} are not available for this ${itemLabel} yet.`}
           />
         </div>
 
@@ -176,7 +221,7 @@ export function JobDetailsModal({ job, onClose }: JobDetailsModalProps) {
               rel="noreferrer"
               className="inline-flex min-h-[44px] items-center gap-1.5 px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm font-bold hover:bg-black transition-all shadow-sm"
             >
-              Open Source Listing
+              {isGrant ? 'Open Official Grant Link' : isVisa ? 'Open Official Visa Link' : 'Open Source Listing'}
               <ExternalLink size={14} />
             </a>
           ) : (

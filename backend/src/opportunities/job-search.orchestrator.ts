@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { createHash } from 'node:crypto'
 import { PrismaService } from '../prisma/prisma.service'
+import { SearchQuotaService } from '../billing/search-quota.service'
 import { runTinyfishWithFallback } from '../tinyfish/tinyfish.client'
 import {
   canonicalizeJobUrl,
@@ -73,6 +74,7 @@ export class JobSearchOrchestrator {
     private readonly prisma: PrismaService,
     private readonly valyuSearch: ValyuSearchService,
     private readonly runStore: JobSearchRunStore,
+    private readonly searchQuota: SearchQuotaService,
   ) {}
 
   async startRun(input: StartSearchRunInput): Promise<{ runId: string }> {
@@ -83,15 +85,24 @@ export class JobSearchOrchestrator {
       return activeRun
     }
 
-    const created = await this.runStore.createRun({
-      userId: normalized.userId,
-      runKind: 'job',
-      query: normalized.query,
-      queryHash: cacheIdentity.queryHash,
-      intentHash: cacheIdentity.intentHash,
-      countryCode: normalized.countryCode,
-      sourceScope: normalized.sourceScope,
-    })
+    const quota = await this.searchQuota.consumeRunAllowance(normalized.userId, 'job')
+    let created: { runId: string }
+    try {
+      created = await this.runStore.createRun({
+        userId: normalized.userId,
+        runKind: 'job',
+        query: normalized.query,
+        queryHash: cacheIdentity.queryHash,
+        intentHash: cacheIdentity.intentHash,
+        countryCode: normalized.countryCode,
+        sourceScope: normalized.sourceScope,
+      })
+    } catch (error) {
+      if (quota.consumed) {
+        await this.searchQuota.releaseConsumedRunAllowance(normalized.userId, 'job', quota.usageDate)
+      }
+      throw error
+    }
 
     void this.executeRun(created.runId, normalized, cacheIdentity).catch(async (error: any) => {
       const details = error instanceof Error ? error.message : String(error)

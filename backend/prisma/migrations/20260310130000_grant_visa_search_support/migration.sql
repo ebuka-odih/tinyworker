@@ -1,0 +1,6 @@
+ALTER TABLE "DailySearchUsage"
+ADD COLUMN "grantRunsConsumed" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "visaRunsConsumed" INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE "Opportunity"
+ADD COLUMN "metadata" JSONB;

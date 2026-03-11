@@ -2,9 +2,10 @@ import { SavedOpportunity, SearchResult } from '../types';
 import { API_BASE, ApiUnauthorizedError, buildAuthHeaders, readErrorMessage } from './apiBase';
 
 function mapSavedOpportunity(raw: any): SavedOpportunity {
+  const type = raw?.type === 'scholarship' || raw?.type === 'grant' || raw?.type === 'visa' ? raw.type : 'job';
   return {
     id: String(raw?.id || ''),
-    type: raw?.type === 'scholarship' || raw?.type === 'visa' ? raw.type : 'job',
+    type,
     title: String(raw?.title || 'Untitled role'),
     organization: raw?.organization ? String(raw.organization) : null,
     location: raw?.location ? String(raw.location) : null,
@@ -14,6 +15,7 @@ function mapSavedOpportunity(raw: any): SavedOpportunity {
     deadline: raw?.deadline ? String(raw.deadline) : null,
     matchScore: typeof raw?.matchScore === 'number' ? raw.matchScore : null,
     source: raw?.source ? String(raw.source) : null,
+    metadata: raw?.metadata && typeof raw.metadata === 'object' ? (raw.metadata as Record<string, unknown>) : null,
     createdAt: raw?.createdAt ? String(raw.createdAt) : undefined,
     updatedAt: raw?.updatedAt ? String(raw.updatedAt) : undefined,
   };
@@ -41,6 +43,15 @@ export async function saveOpportunity(
   result: SearchResult,
   type: SavedOpportunity['type'] = 'job',
 ): Promise<SavedOpportunity> {
+  const metadata = {
+    ...(result.metadata || {}),
+    ...(result.fundingAmount ? { fundingAmount: result.fundingAmount } : {}),
+    ...(result.whoCanApply ? { whoCanApply: result.whoCanApply } : {}),
+    ...(result.locationEligibility ? { locationEligibility: result.locationEligibility } : {}),
+    ...(result.officialApplicationLink ? { officialApplicationLink: result.officialApplicationLink } : {}),
+    ...(result.processingTime ? { processingTime: result.processingTime } : {}),
+  };
+
   const response = await fetch(`${API_BASE}/opportunities/import`, {
     method: 'POST',
     headers: buildAuthHeaders(token, {
@@ -60,6 +71,7 @@ export async function saveOpportunity(
           matchScore:
             result.fitScore === 'High' ? 0.9 : result.fitScore === 'Medium' ? 0.7 : result.fitScore === 'Low' ? 0.5 : null,
           source: result.sourceName || 'tinyfinder-web',
+          ...(Object.keys(metadata).length ? { metadata } : {}),
         },
       ],
     }),

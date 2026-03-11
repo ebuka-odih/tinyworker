@@ -24,6 +24,14 @@ export type SearchIntakeData = {
   intakeTerm?: string;
   academicBackground?: string;
   scholarshipDocumentName?: string | null;
+  grantQuery?: string;
+  grantApplicantType?: 'Individual' | 'Startup' | 'Researcher' | 'NGO' | 'Founder';
+  grantFocusArea?: string;
+  grantLocationEligibility?: string;
+  grantMinimumFunding?: string;
+  grantStage?: 'Idea' | 'Early stage' | 'Growth stage' | 'Established';
+  grantRegionScope?: string;
+  grantDocumentName?: string | null;
   visaCountry?: string;
   visaCategory?: 'Work visa' | 'Student visa' | 'Skilled migration' | 'Digital nomad visa' | 'Tourist visa';
   nationality?: string;
@@ -83,10 +91,20 @@ function getStoragePrefix(userId: string): string {
 }
 
 function resolveSearchType(sessionType: SearchType | null | undefined, formData: SearchIntakeData | null | undefined): SearchType {
-  if (sessionType === SearchType.SCHOLARSHIP || sessionType === SearchType.VISA || sessionType === SearchType.JOB) {
+  if (
+    sessionType === SearchType.SCHOLARSHIP ||
+    sessionType === SearchType.GRANT ||
+    sessionType === SearchType.VISA ||
+    sessionType === SearchType.JOB
+  ) {
     return sessionType;
   }
-  if (formData?.searchType === SearchType.SCHOLARSHIP || formData?.searchType === SearchType.VISA || formData?.searchType === SearchType.JOB) {
+  if (
+    formData?.searchType === SearchType.SCHOLARSHIP ||
+    formData?.searchType === SearchType.GRANT ||
+    formData?.searchType === SearchType.VISA ||
+    formData?.searchType === SearchType.JOB
+  ) {
     return formData.searchType;
   }
   return SearchType.JOB;
@@ -96,6 +114,9 @@ function hasSearchCriteria(formData: SearchIntakeData | null | undefined, type: 
   if (!formData) return false;
   if (type === SearchType.SCHOLARSHIP) {
     return Boolean(formData.scholarshipQuery || formData.destinationRegion || formData.studyLevel || formData.academicBackground);
+  }
+  if (type === SearchType.GRANT) {
+    return Boolean(formData.grantQuery || formData.grantApplicantType || formData.grantFocusArea || formData.grantLocationEligibility);
   }
   if (type === SearchType.VISA) {
     return Boolean(formData.visaCountry || formData.visaCategory || formData.nationality || formData.travelReason);
@@ -141,6 +162,19 @@ function searchFingerprint(type: SearchType, formData: SearchIntakeData): string
       fundingType: normalizeText(formData.fundingType),
       academicBackground: normalizeText(formData.academicBackground),
       intakeTerm: normalizeText(formData.intakeTerm),
+    });
+  }
+
+  if (type === SearchType.GRANT) {
+    return JSON.stringify({
+      type,
+      grantQuery: normalizeText(formData.grantQuery),
+      grantApplicantType: normalizeText(formData.grantApplicantType),
+      grantFocusArea: normalizeText(formData.grantFocusArea),
+      grantLocationEligibility: normalizeText(formData.grantLocationEligibility),
+      grantMinimumFunding: normalizeText(formData.grantMinimumFunding),
+      grantStage: normalizeText(formData.grantStage),
+      grantRegionScope: normalizeText(formData.grantRegionScope),
     });
   }
 

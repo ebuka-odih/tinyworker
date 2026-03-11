@@ -9,6 +9,7 @@ import {
   FileText,
   Globe,
   GraduationCap,
+  HandCoins,
   Landmark,
   MapPinned,
   Settings,
@@ -29,7 +30,7 @@ import {
   writePersistedSearchSession,
 } from '../services/searchSessionStore';
 
-type SearchOptionId = SearchType.JOB | SearchType.SCHOLARSHIP | SearchType.VISA;
+type SearchOptionId = SearchType.JOB | SearchType.SCHOLARSHIP | SearchType.GRANT | SearchType.VISA;
 type StepId =
   | 'roles'
   | 'location'
@@ -40,6 +41,7 @@ type StepId =
   | 'focus'
   | 'destination'
   | 'profile'
+  | 'applicant'
   | 'country'
   | 'path'
   | 'review';
@@ -63,6 +65,14 @@ type IntakeFormData = {
   intakeTerm: string;
   academicBackground: string;
   scholarshipDocument: File | null;
+  grantQuery: string;
+  grantApplicantType: '' | 'Individual' | 'Startup' | 'Researcher' | 'NGO' | 'Founder';
+  grantFocusArea: string;
+  grantLocationEligibility: string;
+  grantMinimumFunding: string;
+  grantStage: '' | 'Idea' | 'Early stage' | 'Growth stage' | 'Established';
+  grantRegionScope: string;
+  grantDocument: File | null;
   visaCountry: string;
   visaCategory: '' | 'Work visa' | 'Student visa' | 'Skilled migration' | 'Digital nomad visa' | 'Tourist visa';
   nationality: string;
@@ -137,6 +147,18 @@ const scholarshipGoalSuggestions = [
   'Chevening-style leadership scholarship',
   'Undergraduate scholarship in Europe',
 ];
+const grantGoalSuggestions = [
+  'AI startup grant',
+  'Climate innovation funding',
+  'Research grant in public health',
+  'Youth entrepreneurship grant',
+  'NGO program funding',
+  'Women founder grant',
+];
+const grantApplicantTypeOptions = ['Individual', 'Startup', 'Researcher', 'NGO', 'Founder'] as const;
+const grantStageSuggestions = ['Idea', 'Early stage', 'Growth stage', 'Established'] as const;
+const grantFocusSuggestions = ['Technology', 'AI', 'Climate', 'Research', 'Education', 'Nonprofit'];
+const grantRegionSuggestions = ['Global', 'Africa', 'Europe', 'North America', 'Middle East'];
 
 const jobSearchModeCards: Array<{
   value: JobSearchMode;
@@ -182,6 +204,14 @@ const stepsByType: Record<SearchType, StepConfig[]> = {
     { id: 'preferences', title: 'Preferences', icon: Settings },
     { id: 'review', title: 'Review', icon: Check },
   ],
+  [SearchType.GRANT]: [
+    { id: 'focus', title: 'Funding Goal', icon: HandCoins },
+    { id: 'applicant', title: 'Applicant', icon: User },
+    { id: 'location', title: 'Location', icon: MapPinned },
+    { id: 'documents', title: 'Documents', icon: FileText },
+    { id: 'preferences', title: 'Preferences', icon: Settings },
+    { id: 'review', title: 'Review', icon: Check },
+  ],
   [SearchType.VISA]: [
     { id: 'country', title: 'Country', icon: Landmark },
     { id: 'path', title: 'Visa Path', icon: FileText },
@@ -193,7 +223,7 @@ const stepsByType: Record<SearchType, StepConfig[]> = {
 };
 
 function normalizeType(input?: string): SearchOptionId | undefined {
-  if (input === SearchType.JOB || input === SearchType.SCHOLARSHIP || input === SearchType.VISA) {
+  if (input === SearchType.JOB || input === SearchType.SCHOLARSHIP || input === SearchType.GRANT || input === SearchType.VISA) {
     return input;
   }
   return undefined;
@@ -201,6 +231,7 @@ function normalizeType(input?: string): SearchOptionId | undefined {
 
 function getSearchTypeLabel(type: SearchOptionId): string {
   if (type === SearchType.SCHOLARSHIP) return 'Scholarships';
+  if (type === SearchType.GRANT) return 'Grants';
   if (type === SearchType.VISA) return 'Visa Requirements';
   return 'Jobs';
 }
@@ -229,6 +260,14 @@ function buildIntakeFormData(searchType: SearchOptionId, prefill?: SearchIntakeD
     intakeTerm: prefill?.intakeTerm || '',
     academicBackground: prefill?.academicBackground || '',
     scholarshipDocument: null,
+    grantQuery: prefill?.grantQuery || '',
+    grantApplicantType: prefill?.grantApplicantType || '',
+    grantFocusArea: prefill?.grantFocusArea || '',
+    grantLocationEligibility: prefill?.grantLocationEligibility || '',
+    grantMinimumFunding: prefill?.grantMinimumFunding || '',
+    grantStage: prefill?.grantStage || '',
+    grantRegionScope: prefill?.grantRegionScope || '',
+    grantDocument: null,
     visaCountry: prefill?.visaCountry || '',
     visaCategory: prefill?.visaCategory || '',
     nationality: prefill?.nationality || '',
@@ -247,6 +286,13 @@ function getPrefillStep(formData: IntakeFormData): number {
     if (!formData.scholarshipQuery.trim()) return 0;
     if (!formData.destinationRegion.trim()) return 1;
     if (!formData.studyLevel || !formData.academicBackground.trim()) return 2;
+    return 3;
+  }
+
+  if (formData.searchType === SearchType.GRANT) {
+    if (!formData.grantQuery.trim()) return 0;
+    if (!formData.grantApplicantType) return 1;
+    if (!formData.grantLocationEligibility.trim()) return 2;
     return 3;
   }
 
@@ -282,6 +328,14 @@ function toPersistableFormData(formData: IntakeFormData): JobSearchIntakeData {
     intakeTerm: formData.intakeTerm,
     academicBackground: formData.academicBackground,
     scholarshipDocumentName: formData.scholarshipDocument?.name || null,
+    grantQuery: formData.grantQuery,
+    grantApplicantType: formData.grantApplicantType || undefined,
+    grantFocusArea: formData.grantFocusArea,
+    grantLocationEligibility: formData.grantLocationEligibility,
+    grantMinimumFunding: formData.grantMinimumFunding,
+    grantStage: formData.grantStage || undefined,
+    grantRegionScope: formData.grantRegionScope,
+    grantDocumentName: formData.grantDocument?.name || null,
     visaCountry: formData.visaCountry,
     visaCategory: formData.visaCategory || undefined,
     nationality: formData.nationality,
@@ -299,6 +353,7 @@ export function IntakePage() {
   const { authUser } = useAuth();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const scholarshipFileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const grantFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const visaFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const routeState = (location.state || {}) as IntakeLocationState;
   const authUserId = String(authUser?.userId || '').trim();
@@ -351,6 +406,23 @@ export function IntakePage() {
             return formData.scholarshipQuery.trim() && formData.destinationRegion.trim() && formData.studyLevel && formData.academicBackground.trim()
               ? ''
               : 'Required scholarship criteria is incomplete. Go back and finish the missing steps.';
+          default:
+            return '';
+        }
+      }
+
+      if (formData.searchType === SearchType.GRANT) {
+        switch (step.id) {
+          case 'focus':
+            return formData.grantQuery.trim() ? '' : 'Add the funding theme or grant you want to search for.';
+          case 'applicant':
+            return formData.grantApplicantType ? '' : 'Choose the applicant type that best fits this search.';
+          case 'location':
+            return formData.grantLocationEligibility.trim() ? '' : 'Choose the location eligibility or region scope.';
+          case 'review':
+            return formData.grantQuery.trim() && formData.grantApplicantType && formData.grantLocationEligibility.trim()
+              ? ''
+              : 'Required grant criteria is incomplete. Go back and finish the missing steps.';
           default:
             return '';
         }
@@ -474,7 +546,12 @@ export function IntakePage() {
       return;
     }
 
-    if (formData.searchType === SearchType.JOB || formData.searchType === SearchType.SCHOLARSHIP) {
+    if (
+      formData.searchType === SearchType.JOB ||
+      formData.searchType === SearchType.SCHOLARSHIP ||
+      formData.searchType === SearchType.GRANT ||
+      formData.searchType === SearchType.VISA
+    ) {
       const sessionId = reusedFromSessionId || Math.random().toString(36).substring(7);
       navigate(`/session/${sessionId}`, {
         state: {
@@ -540,6 +617,19 @@ export function IntakePage() {
         { label: 'Academic Background', value: formData.academicBackground || 'Not set', step: 2 },
         { label: 'Funding Preference', value: formData.fundingType || 'Any funding', step: 4 },
         { label: 'Target Intake', value: formData.intakeTerm || 'Flexible', step: 4 },
+      ];
+    }
+
+    if (formData.searchType === SearchType.GRANT) {
+      return [
+        { label: 'Search Type', value: 'Grants', step: 0 },
+        { label: 'Focus', value: formData.grantQuery || 'Not set', step: 0 },
+        { label: 'Applicant Type', value: formData.grantApplicantType || 'Not set', step: 1 },
+        { label: 'Location Eligibility', value: formData.grantLocationEligibility || 'Not set', step: 2 },
+        { label: 'Region Scope', value: formData.grantRegionScope || 'Global', step: 2 },
+        { label: 'Focus Area', value: formData.grantFocusArea || 'Any', step: 4 },
+        { label: 'Minimum Funding', value: formData.grantMinimumFunding || 'Any', step: 4 },
+        { label: 'Stage', value: formData.grantStage || 'Any stage', step: 4 },
       ];
     }
 
@@ -726,6 +816,48 @@ export function IntakePage() {
         );
 
       case 'focus':
+        if (formData.searchType === SearchType.GRANT) {
+          return (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-[28px] font-bold mb-2">What grant are you targeting?</h2>
+                <p className="text-neutral-500 mb-8">Describe the funding theme, program, or grant type you want to search for.</p>
+
+                <label className="block text-sm font-semibold mb-2 uppercase tracking-wider text-neutral-400">Funding goal</label>
+                <input
+                  type="text"
+                  value={formData.grantQuery}
+                  onChange={(event) => updateFormData('grantQuery', event.target.value)}
+                  placeholder="e.g. startup grants 2026, AI innovation grants, nonprofit funding"
+                  className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-neutral-900 transition-all"
+                />
+                <p className="mt-2 text-xs text-neutral-500">Use the exact funding theme or call type you care about most.</p>
+
+                <div className="mt-5">
+                  <p className="text-xs uppercase tracking-widest font-bold text-neutral-400 mb-2">Quick options</p>
+                  <div className="flex flex-wrap gap-2">
+                    {grantGoalSuggestions.map((goal) => {
+                      const selected = formData.grantQuery.trim().toLowerCase() === goal.toLowerCase();
+                      return (
+                        <button
+                          key={goal}
+                          type="button"
+                          onClick={() => updateFormData('grantQuery', goal)}
+                          className={`px-3 py-1.5 rounded-lg text-sm border transition-all ${
+                            selected ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200 hover:border-neutral-400'
+                          }`}
+                        >
+                          {goal}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="space-y-6">
             <div>
@@ -1332,9 +1464,7 @@ export function IntakePage() {
           </div>
           <h1 className="mt-6 text-[30px] font-bold tracking-tight text-neutral-950">Criteria saved to Recent Searches.</h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-neutral-500 md:text-base">
-            {formData.searchType === SearchType.SCHOLARSHIP
-              ? 'This scholarship flow is now saved as a structured search profile. Live scholarship runs are not wired yet, so this was stored for reuse and future execution.'
-              : 'This visa requirement flow is now saved as a structured checklist search. Live visa runs are not wired yet, so this was stored for reuse and future execution.'}
+            This flow was saved as a reusable search setup. You can reopen it from Recent Searches or jump straight into a live run.
           </p>
 
           <div className="mt-6 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
@@ -1419,7 +1549,7 @@ export function IntakePage() {
                     {formData.searchType === SearchType.VISA && 'Visa requirement intake'}
                   </h1>
                   <p className="mt-2 text-sm leading-7 text-neutral-500">
-                    {formData.searchType === SearchType.VISA && 'Capture structured visa criteria now. This flow saves your search setup for reuse while visa runs are still offline.'}
+                    {formData.searchType === SearchType.VISA && 'Capture the right visa context now so the live search starts with the correct route, country, and applicant profile.'}
                   </p>
                 </div>
               </div>
@@ -1464,7 +1594,7 @@ export function IntakePage() {
             {steps[currentStep]?.id === 'review' && formData.searchType === SearchType.VISA && (
               <div className="mt-6 p-3 rounded-xl border border-sky-200 bg-sky-50 text-sky-900 flex items-start gap-2">
                 <Sparkles size={16} className="mt-0.5" />
-                <p className="text-sm">This flow saves structured criteria now. Live visa execution will plug in later.</p>
+                <p className="text-sm">Your visa criteria will be used to start a live search against official immigration sources.</p>
               </div>
             )}
 
