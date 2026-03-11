@@ -197,7 +197,7 @@ export function NewSearchPage() {
             Jobs, scholarships, grants, and visa requirements can all run live now.
           </div>
 
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
             {searchTypeCards.map((card, index) => (
               <motion.button
                 key={card.type}
