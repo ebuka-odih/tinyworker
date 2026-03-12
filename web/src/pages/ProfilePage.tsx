@@ -153,11 +153,6 @@ export function ProfilePage() {
   }, [accessToken, authUser?.billingCurrency, authUser?.searchQuota, handleSignOut]);
 
   React.useEffect(() => {
-    if (!accessToken) return;
-    void refreshAuthUser();
-  }, [accessToken, refreshAuthUser]);
-
-  React.useEffect(() => {
     if (!accessToken || activeTab !== 'saved') return;
     let cancelled = false;
 
