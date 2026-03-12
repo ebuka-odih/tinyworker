@@ -34,6 +34,19 @@ const EMPTY_SEARCH_RUN_SUMMARY: SearchRunSummary = {
   visasRun: 0,
 };
 
+const EMPTY_BILLING_SUMMARY: BillingSummary = {
+  enabled: false,
+  currentSubscription: null,
+  searchQuota: {
+    dailyLimit: null,
+    usedToday: 0,
+    remainingToday: null,
+    resetAt: '',
+    unlimited: false,
+  },
+  availablePlans: [],
+};
+
 function formatDateTime(value?: string | null) {
   if (!value) return 'Not available';
   const date = new Date(value);
@@ -61,11 +74,16 @@ function planSortValue(plan: BillingPlan) {
   return plan.interval === 'weekly' ? 0 : 1;
 }
 
+function isMissingBillingRoute(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /\b404\b/.test(message) || /cannot\s+(get|post)\s+\/api\/billing/i.test(message);
+}
+
 export function ProfilePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { accessToken, authUser, refreshAuthUser, signOut } = useAuth();
-  const [activeTab, setActiveTab] = React.useState<'saved' | 'billing' | 'settings'>('billing');
+  const [activeTab, setActiveTab] = React.useState<'saved' | 'billing' | 'settings'>('saved');
   const [savedOpportunities, setSavedOpportunities] = React.useState<SavedOpportunity[]>([]);
   const [savedLoading, setSavedLoading] = React.useState(true);
   const [billingSummary, setBillingSummary] = React.useState<BillingSummary | null>(null);
@@ -95,6 +113,12 @@ export function ProfilePage() {
     navigate('/auth?next=%2Fnew-search', { replace: true });
   }, [navigate, signOut]);
 
+  React.useEffect(() => {
+    if (bannerState) {
+      setActiveTab('billing');
+    }
+  }, [bannerState]);
+
   const loadBilling = React.useCallback(async () => {
     setBillingLoading(true);
     setBillingError(null);
@@ -113,12 +137,20 @@ export function ProfilePage() {
         handleSignOut();
         return;
       }
+      if (isMissingBillingRoute(error)) {
+        setBillingSummary({
+          ...EMPTY_BILLING_SUMMARY,
+          searchQuota: authUser?.searchQuota || EMPTY_BILLING_SUMMARY.searchQuota,
+        });
+        setBillingError(null);
+        return;
+      }
       setBillingSummary(null);
       setBillingError(error instanceof Error ? error.message : 'Could not load billing right now.');
     } finally {
       setBillingLoading(false);
     }
-  }, [accessToken, authUser?.billingCurrency, handleSignOut]);
+  }, [accessToken, authUser?.billingCurrency, authUser?.searchQuota, handleSignOut]);
 
   React.useEffect(() => {
     if (!accessToken) return;
@@ -126,6 +158,7 @@ export function ProfilePage() {
   }, [accessToken, refreshAuthUser]);
 
   React.useEffect(() => {
+    if (!accessToken || activeTab !== 'saved') return;
     let cancelled = false;
 
     const loadSavedOpportunities = async () => {
@@ -149,12 +182,16 @@ export function ProfilePage() {
     };
 
     void loadSavedOpportunities();
-    void loadBilling();
 
     return () => {
       cancelled = true;
     };
-  }, [accessToken, handleSignOut, loadBilling]);
+  }, [accessToken, activeTab, handleSignOut]);
+
+  React.useEffect(() => {
+    if (!accessToken || (activeTab !== 'billing' && !bannerState)) return;
+    void loadBilling();
+  }, [accessToken, activeTab, bannerState, loadBilling]);
 
   const filteredPlans = React.useMemo(
     () =>
