@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'r
 
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Layout } from './components/Layout';
+import { Seo } from './components/Seo';
 import { AuthPage } from './pages/AuthPage';
 import { LandingPage } from './pages/LandingPage';
 import { IntakePage } from './pages/IntakePage';
@@ -35,6 +36,7 @@ function RequireAuth({ children }: { children: ReactElement }) {
 function AppRoutes() {
   return (
     <Layout>
+      <Seo />
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/auth" element={<AuthPage />} />

@@ -1,0 +1,16 @@
+{
+  "name": "TinyFinder",
+  "short_name": "TinyFinder",
+  "description": "Guided opportunity search for jobs, scholarships, grants, and visa pathways.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

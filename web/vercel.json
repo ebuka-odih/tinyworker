@@ -5,6 +5,26 @@
       "dest": "https://tinyworker-production.up.railway.app/api/$1"
     },
     {
+      "src": "^/$",
+      "dest": "/landing.html"
+    },
+    {
+      "src": "^/jobs/?$",
+      "dest": "/jobs.html"
+    },
+    {
+      "src": "^/scholarships/?$",
+      "dest": "/scholarships.html"
+    },
+    {
+      "src": "^/grants/?$",
+      "dest": "/grants.html"
+    },
+    {
+      "src": "^/visa-guidance/?$",
+      "dest": "/visa-guidance.html"
+    },
+    {
       "handle": "filesystem"
     },
     {

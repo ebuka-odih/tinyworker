@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">TinyFinder social card</title>
+  <desc id="desc">TinyFinder helps users search jobs, scholarships, grants, and visa pathways faster.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="52%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+    <radialGradient id="glow" cx="20%" cy="15%" r="65%">
+      <stop offset="0%" stop-color="rgba(59,130,246,0.55)" />
+      <stop offset="100%" stop-color="rgba(59,130,246,0)" />
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)" />
+  <rect width="1200" height="630" fill="url(#glow)" />
+  <rect x="64" y="64" width="1072" height="502" rx="38" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.16)" />
+  <rect x="112" y="110" width="88" height="88" rx="26" fill="#ffffff" />
+  <path d="M138 134h36v12h-12v24h-12v-24h-12z" fill="#111827" />
+  <text x="224" y="164" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="44" font-weight="700">TinyFinder</text>
+  <text x="112" y="270" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="78" font-weight="700">
+    Search jobs, scholarships,
+  </text>
+  <text x="112" y="360" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="78" font-weight="700">
+    grants, and visa pathways
+  </text>
+  <text x="112" y="450" fill="#cbd5e1" font-family="Inter, Arial, sans-serif" font-size="34">
+    Guided opportunity discovery with cleaner results and less manual searching.
+  </text>
+  <g transform="translate(744 118)">
+    <rect width="300" height="106" rx="26" fill="rgba(255,255,255,0.10)" />
+    <text x="28" y="42" fill="#93c5fd" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700">Search coverage</text>
+    <text x="28" y="78" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">Jobs  Scholarships  Grants  Visas</text>
+  </g>
+  <g transform="translate(744 254)">
+    <rect width="300" height="106" rx="26" fill="rgba(255,255,255,0.10)" />
+    <text x="28" y="42" fill="#93c5fd" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700">Best for</text>
+    <text x="28" y="78" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">Guided search workflows</text>
+  </g>
+  <g transform="translate(744 390)">
+    <rect width="300" height="106" rx="26" fill="rgba(255,255,255,0.10)" />
+    <text x="28" y="42" fill="#93c5fd" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700">URL</text>
+    <text x="28" y="78" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">tinyworker.vercel.app</text>
+  </g>
+</svg>
